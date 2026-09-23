@@ -6,7 +6,7 @@ Odczytuje liste URL-i produktow z products.txt, dla kazdego pobiera strone,
 wybiera parser na podstawie domeny (SHOPS) i wyciaga cene regularna, promocyjna
 i dostepnosc, a nastepnie dopisuje wiersz z wynikiem do data/prices.csv.
 
-Uruchamiane co 15 min przez GitHub Actions (.github/workflows/scrape.yml).
+Uruchamiane co 30 min z lokalnego crona (scripts/cron_scrape.sh).
 """
 
 import csv
@@ -73,11 +73,11 @@ MAX_SHOP_FAILURES = 2
 
 # Jak dlugo trzymamy ten sam profil przegladarki i cookies. Powracajacy
 # "uzytkownik" z tymi samymi cookies wyglada naturalniej niz nowa, pusta
-# przegladarka co 15 minut - ale co kilka dni zmieniamy tozsamosc.
+# przegladarka przy kazdym przebiegu - ale co kilka dni zmieniamy tozsamosc.
 IDENTITY_TTL_RANGE = (1 * 86400, 3 * 86400)
 
 # Po blokadzie sklep odpoczywa przez kilka przebiegow: 1 h, 2 h, 4 h ... max 12 h.
-# Dobijanie sie co 15 min do zablokowanego sklepu tylko przedluza blokade.
+# Dobijanie sie przy kazdym przebiegu do zablokowanego sklepu tylko przedluza blokade.
 COOLDOWN_BASE = 3600
 COOLDOWN_MAX = 12 * 3600
 
@@ -344,7 +344,7 @@ def append_rows(rows: list[dict]) -> None:
 
 def main() -> None:
     urls = load_products(PRODUCTS_FILE)
-    # losowa kolejnosc - ten sam porzadek co 15 min to latwy do wylapania wzorzec
+    # losowa kolejnosc - ten sam porzadek w kazdym przebiegu to latwy do wylapania wzorzec
     random.shuffle(urls)
     timestamp = datetime.now(timezone.utc).isoformat(timespec="seconds")
     state = load_state()

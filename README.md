@@ -1,6 +1,6 @@
 # Monitor cen Media Expert i RTV Euro AGD
 
-Automatyczny scraper cen produktów z mediaexpert.pl i euro.com.pl, uruchamiany co 15 minut
+Automatyczny scraper cen produktów z mediaexpert.pl i euro.com.pl, uruchamiany co 30 minut
 przez crona na lokalnym komputerze, z historią zapisywaną do CSV i wizualizacją na
 GitHub Pages.
 
@@ -34,7 +34,7 @@ GitHub Pages.
    pip install --user -r requirements.txt
    crontab -e
    # dopisz:
-   */15 * * * * /sciezka/do/repo/scripts/cron_scrape.sh
+   */30 * * * * /sciezka/do/repo/scripts/cron_scrape.sh
    ```
    Skrypt pracuje na osobnym klonie repo (`~/.local/share/price-scraper-cron`),
    więc nie rusza Twojej kopii roboczej. Dopisuje wiersze do
@@ -65,7 +65,7 @@ products.txt                   - lista URL-i produktów do monitorowania
 requirements.txt               - zależności Pythona
 data/prices.csv                - historia cen (tworzona automatycznie)
 docs/index.html                - strona z wykresem (Chart.js) dla GitHub Pages
-scripts/cron_scrape.sh         - uruchamianie z lokalnego crona (co 15 min)
+scripts/cron_scrape.sh         - uruchamianie z lokalnego crona (co 30 min)
 .github/workflows/scrape.yml   - ręczne uruchomienie w GitHub Actions
 ```
 
