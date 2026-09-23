@@ -2,7 +2,9 @@ name: Scrape prices
 
 on:
   schedule:
-    - cron: "*/15 * * * *" # co 15 min (UTC, GitHub moze opoznic start o kilka minut)
+    # co 15 min, ale przesuniete z pelnych kwadransow (:00/:15/:30/:45), kiedy
+    # startuje wiekszosc workflowow na GitHubie i opoznienia sa najwieksze (UTC)
+    - cron: "7,22,37,52 * * * *"
   workflow_dispatch: # reczne uruchomienie z zakladki Actions
 
 permissions:
