@@ -29,6 +29,11 @@ if ! flock -n 9; then
   exit 0
 fi
 
+# losowe opoznienie startu (0-3 min) - zeby requesty nie przychodzily zawsze
+# rowno o :00/:15/:30/:45, co jest typowym sladem crona
+START_JITTER_MAX="${START_JITTER_MAX:-180}"
+sleep $((RANDOM % (START_JITTER_MAX + 1)))
+
 echo "===== $(date -Is) ====="
 
 if [ ! -d "$CLONE_DIR/.git" ]; then

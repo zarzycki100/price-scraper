@@ -39,15 +39,37 @@ FIELDNAMES = [
 # Media Expert stoi za Cloudflare, ktory odrzuca (403, "cf-mitigated: challenge")
 # zwykle requests/urllib po odcisku TLS/HTTP2. curl_cffi podszywa sie pod
 # prawdziwa przegladarke (TLS, HTTP/2, naglowki), wiec przechodzi bez challenge.
-IMPERSONATE = "chrome"
+#
+# Profil losujemy raz na przebieg (a nie na request): prawdziwy uzytkownik nie
+# zmienia przegladarki miedzy kliknieciami, a rozne odciski TLS z jednego IP
+# w ciagu minuty wygladaja podejrzanie. Tylko wspolczesne profile desktopowe.
+IMPERSONATE_PROFILES = [
+    "chrome136", "chrome142", "chrome145", "chrome146",
+    "edge101",
+    "safari184", "safari260",
+    "firefox144", "firefox147",
+]
 
 # Losowa przerwa (w sekundach) miedzy kolejnymi produktami - rowne odstepy
-# co do milisekundy to typowy slad bota.
-DELAY_RANGE = (3, 10)
+# co do milisekundy to typowy slad bota. Czasem robimy dluzsza pauze,
+# jak czlowiek, ktory zatrzymal sie na stronie produktu.
+DELAY_RANGE = (4, 12)
+LONG_PAUSE_CHANCE = 0.15
+LONG_PAUSE_RANGE = (15, 40)
 
-HEADERS = {
-    "Accept-Language": "pl-PL,pl;q=0.9,en;q=0.8",
-}
+# Odpowiedzi oznaczajace blokade / limit - ponawiamy z rosnaca przerwa.
+RETRY_STATUSES = {403, 429, 503}
+RETRY_DELAYS = [(20, 40), (60, 90)]
+# Po tylu kolejnych blokadach z jednego sklepu odpuszczamy go w tym przebiegu,
+# zeby nie dobijac sie dalej i nie utrwalac blokady.
+MAX_SHOP_FAILURES = 2
+
+ACCEPT_LANGUAGES = [
+    "pl-PL,pl;q=0.9,en-US;q=0.8,en;q=0.7",
+    "pl-PL,pl;q=0.9,en;q=0.8",
+    "pl,en-US;q=0.9,en;q=0.8",
+    "pl-PL,pl;q=0.8,en-US;q=0.5,en;q=0.3",
+]
 
 # Nazwy meta-tagow <meta property="..." content="..."> uzywanych przez Media Expert.
 META_KEYS = {
@@ -164,15 +186,50 @@ def load_products(path: Path) -> list[str]:
     return urls
 
 
-def fetch_product(url: str) -> dict:
+def new_session() -> requests.Session:
+    """Sesja udajaca jedna, losowo wybrana przegladarke przez caly przebieg.
+
+    Sesja trzyma cookies miedzy requestami (np. te ustawiane przez Cloudflare),
+    tak jak robi to prawdziwa przegladarka.
+    """
+    profile = random.choice(IMPERSONATE_PROFILES)
+    print(f"Profil przegladarki: {profile}")
+    return requests.Session(
+        impersonate=profile,
+        headers={"Accept-Language": random.choice(ACCEPT_LANGUAGES)},
+        timeout=20,
+    )
+
+
+def human_pause() -> None:
+    if random.random() < LONG_PAUSE_CHANCE:
+        time.sleep(random.uniform(*LONG_PAUSE_RANGE))
+    else:
+        time.sleep(random.uniform(*DELAY_RANGE))
+
+
+def get_with_retry(session: requests.Session, url: str) -> requests.Response:
+    """GET z ponawianiem po 403/429/503 (z uwzglednieniem Retry-After)."""
+    for attempt in range(len(RETRY_DELAYS) + 1):
+        resp = session.get(url)
+        if resp.status_code not in RETRY_STATUSES or attempt == len(RETRY_DELAYS):
+            break
+        retry_after = resp.headers.get("Retry-After", "")
+        wait = int(retry_after) if retry_after.isdigit() else random.uniform(*RETRY_DELAYS[attempt])
+        print(f"HTTP {resp.status_code} dla {url} - ponawiam za {wait:.0f} s", file=sys.stderr)
+        time.sleep(wait)
+    resp.raise_for_status()
+    return resp
+
+
+def fetch_product(session: requests.Session, url: str) -> dict:
     """Pobiera strone produktu i wyciaga dane cenowe parserem wlasciwym dla sklepu."""
     host = urlparse(url).hostname
     if host not in SHOPS:
         raise ValueError(f"nieobslugiwany sklep: {host}")
     shop, parser = SHOPS[host]
 
-    resp = requests.get(url, headers=HEADERS, impersonate=IMPERSONATE, timeout=20)
-    resp.raise_for_status()
+    resp = get_with_retry(session, url)
     soup = BeautifulSoup(resp.text, "html.parser")
     return {"url": url, "shop": shop, **parser(soup, resp.text)}
 
@@ -213,18 +270,30 @@ def append_rows(rows: list[dict]) -> None:
 
 def main() -> None:
     urls = load_products(PRODUCTS_FILE)
+    # losowa kolejnosc - ten sam porzadek co 15 min to latwy do wylapania wzorzec
+    random.shuffle(urls)
     timestamp = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    session = new_session()
 
     rows = []
+    blocked: dict[str, int] = {}  # host -> liczba kolejnych blokad
     for i, url in enumerate(urls):
+        host = urlparse(url).hostname
+        if blocked.get(host, 0) >= MAX_SHOP_FAILURES:
+            print(f"POMIJAM {url}: {host} blokuje w tym przebiegu", file=sys.stderr)
+            continue
         if i > 0:
-            time.sleep(random.uniform(*DELAY_RANGE))
+            human_pause()
         try:
-            data = fetch_product(url)
+            data = fetch_product(session, url)
+            blocked[host] = 0
             data["timestamp"] = timestamp
             rows.append(data)
             print(f"OK  [{data['shop']}] {data['title']!r} -> cena: {data['price']}, promo: {data['sale_price']}")
         except Exception as exc:  # noqa: BLE001 - chcemy zebrac reszte produktow nawet po bledzie
+            status = getattr(getattr(exc, "response", None), "status_code", None)
+            if status in RETRY_STATUSES:
+                blocked[host] = blocked.get(host, 0) + 1
             print(f"BLAD dla {url}: {exc}", file=sys.stderr)
 
     if rows:
