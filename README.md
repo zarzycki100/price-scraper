@@ -40,7 +40,9 @@ GitHub Pages.
    więc nie rusza Twojej kopii roboczej. Dopisuje wiersze do
    `data/prices.csv`, commituje i pushuje je do repo.
    Log: `~/.local/state/price-scraper/cron.log`.
-   Strona na GitHub Pages odczytuje ten plik na żywo i ma dwa widoki:
+   Stan scrapera (profil przeglądarki, cookies, przerwy po blokadach):
+   `~/.local/state/price-scraper/state.json` — usuń go, żeby zacząć od zera.
+   Strona na GitHub Pages odczytuje `data/prices.csv` na żywo i ma dwa widoki:
    - **Produkt** — historia ceny regularnej i promocyjnej jednego produktu
      (lista pogrupowana po sklepach, z oznaczeniem sklepu i linkiem),
    - **Porównanie w sklepie** (`#porownanie` w adresie) — ceny wszystkich

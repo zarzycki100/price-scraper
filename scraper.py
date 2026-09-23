@@ -11,6 +11,7 @@ Uruchamiane co 15 min przez GitHub Actions (.github/workflows/scrape.yml).
 
 import csv
 import json
+import os
 import random
 import re
 import sys
@@ -24,6 +25,12 @@ from curl_cffi import requests
 
 PRODUCTS_FILE = Path("products.txt")
 OUTPUT_CSV = Path("data/prices.csv")
+
+# Stan miedzy przebiegami (profil przegladarki, cookies, przerwy po blokadach).
+# Poza repo, bo cron robi na swoim klonie `git reset --hard`.
+STATE_FILE = Path(
+    os.environ.get("SCRAPER_STATE_DIR") or Path.home() / ".local/state/price-scraper"
+) / "state.json"
 
 FIELDNAMES = [
     "timestamp",
@@ -63,6 +70,19 @@ RETRY_DELAYS = [(20, 40), (60, 90)]
 # Po tylu kolejnych blokadach z jednego sklepu odpuszczamy go w tym przebiegu,
 # zeby nie dobijac sie dalej i nie utrwalac blokady.
 MAX_SHOP_FAILURES = 2
+
+# Jak dlugo trzymamy ten sam profil przegladarki i cookies. Powracajacy
+# "uzytkownik" z tymi samymi cookies wyglada naturalniej niz nowa, pusta
+# przegladarka co 15 minut - ale co kilka dni zmieniamy tozsamosc.
+IDENTITY_TTL_RANGE = (1 * 86400, 3 * 86400)
+
+# Po blokadzie sklep odpoczywa przez kilka przebiegow: 1 h, 2 h, 4 h ... max 12 h.
+# Dobijanie sie co 15 min do zablokowanego sklepu tylko przedluza blokade.
+COOLDOWN_BASE = 3600
+COOLDOWN_MAX = 12 * 3600
+
+# Strony "sprawdzania przegladarki" (np. Cloudflare) potrafia przyjsc z kodem 200.
+CHALLENGE_MARKERS = ("<title>Just a moment", "Attention Required! | Cloudflare", "cf-chl")
 
 ACCEPT_LANGUAGES = [
     "pl-PL,pl;q=0.9,en-US;q=0.8,en;q=0.7",
@@ -186,19 +206,63 @@ def load_products(path: Path) -> list[str]:
     return urls
 
 
-def new_session() -> requests.Session:
-    """Sesja udajaca jedna, losowo wybrana przegladarke przez caly przebieg.
+class Blocked(Exception):
+    """Sklep odrzucil zapytanie (403/429/503 albo strona challenge)."""
+
+
+def load_state() -> dict:
+    try:
+        return json.loads(STATE_FILE.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+
+
+def save_state(state: dict) -> None:
+    STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
+    STATE_FILE.write_text(json.dumps(state, indent=2), encoding="utf-8")
+
+
+def forget_identity(state: dict) -> None:
+    """Po blokadzie porzucamy profil i cookies - mogly zostac oznaczone jako bot."""
+    state.pop("identity", None)
+    state.pop("cookies", None)
+
+
+def new_session(state: dict) -> requests.Session:
+    """Sesja udajaca jedna przegladarke - ta sama przez kilka dni, z zapisanymi cookies.
 
     Sesja trzyma cookies miedzy requestami (np. te ustawiane przez Cloudflare),
     tak jak robi to prawdziwa przegladarka.
     """
-    profile = random.choice(IMPERSONATE_PROFILES)
-    print(f"Profil przegladarki: {profile}")
-    return requests.Session(
-        impersonate=profile,
-        headers={"Accept-Language": random.choice(ACCEPT_LANGUAGES)},
+    now = time.time()
+    identity = state.get("identity")
+    if not identity or identity.get("expires", 0) < now or identity.get("profile") not in IMPERSONATE_PROFILES:
+        forget_identity(state)
+        identity = state["identity"] = {
+            "profile": random.choice(IMPERSONATE_PROFILES),
+            "accept_language": random.choice(ACCEPT_LANGUAGES),
+            "expires": now + random.uniform(*IDENTITY_TTL_RANGE),
+        }
+        print(f"Nowy profil przegladarki: {identity['profile']}")
+    else:
+        print(f"Profil przegladarki: {identity['profile']}")
+
+    session = requests.Session(
+        impersonate=identity["profile"],
+        headers={"Accept-Language": identity["accept_language"]},
         timeout=20,
     )
+    for c in state.get("cookies", []):
+        if c.get("expires") is None or c["expires"] > now:
+            session.cookies.set(c["name"], c["value"], domain=c["domain"], path=c["path"])
+    return session
+
+
+def dump_cookies(session: requests.Session) -> list[dict]:
+    return [
+        {"name": c.name, "value": c.value, "domain": c.domain, "path": c.path, "expires": c.expires}
+        for c in session.cookies.jar
+    ]
 
 
 def human_pause() -> None:
@@ -208,18 +272,28 @@ def human_pause() -> None:
         time.sleep(random.uniform(*DELAY_RANGE))
 
 
+def is_blocked(resp: requests.Response) -> bool:
+    if resp.status_code in RETRY_STATUSES or resp.headers.get("cf-mitigated"):
+        return True
+    return any(marker in resp.text for marker in CHALLENGE_MARKERS)
+
+
 def get_with_retry(session: requests.Session, url: str) -> requests.Response:
-    """GET z ponawianiem po 403/429/503 (z uwzglednieniem Retry-After)."""
+    """GET z ponawianiem po blokadzie (z uwzglednieniem Retry-After)."""
     for attempt in range(len(RETRY_DELAYS) + 1):
         resp = session.get(url)
-        if resp.status_code not in RETRY_STATUSES or attempt == len(RETRY_DELAYS):
+        if not is_blocked(resp):
+            resp.raise_for_status()
+            return resp
+        if attempt == len(RETRY_DELAYS):
             break
         retry_after = resp.headers.get("Retry-After", "")
         wait = int(retry_after) if retry_after.isdigit() else random.uniform(*RETRY_DELAYS[attempt])
-        print(f"HTTP {resp.status_code} dla {url} - ponawiam za {wait:.0f} s", file=sys.stderr)
+        if wait > max(RETRY_DELAYS[-1]):
+            break  # kaze czekac dluzej niz przebieg - niech zadziala cooldown
+        print(f"Blokada (HTTP {resp.status_code}) dla {url} - ponawiam za {wait:.0f} s", file=sys.stderr)
         time.sleep(wait)
-    resp.raise_for_status()
-    return resp
+    raise Blocked(f"HTTP {resp.status_code}, blokada po {attempt + 1} probach")
 
 
 def fetch_product(session: requests.Session, url: str) -> dict:
@@ -273,32 +347,55 @@ def main() -> None:
     # losowa kolejnosc - ten sam porzadek co 15 min to latwy do wylapania wzorzec
     random.shuffle(urls)
     timestamp = datetime.now(timezone.utc).isoformat(timespec="seconds")
-    session = new_session()
+    state = load_state()
+    cooldowns: dict[str, dict] = state.setdefault("cooldowns", {})
+    session = new_session(state)
 
     rows = []
-    blocked: dict[str, int] = {}  # host -> liczba kolejnych blokad
-    for i, url in enumerate(urls):
+    attempted = 0
+    blocked: dict[str, int] = {}  # host -> liczba kolejnych blokad w tym przebiegu
+    for url in urls:
         host = urlparse(url).hostname
+        cooldown = cooldowns.get(host, {})
+        if cooldown.get("until", 0) > time.time():
+            left = (cooldown["until"] - time.time()) / 60
+            print(f"POMIJAM {url}: {host} odpoczywa po blokadzie jeszcze {left:.0f} min", file=sys.stderr)
+            continue
         if blocked.get(host, 0) >= MAX_SHOP_FAILURES:
             print(f"POMIJAM {url}: {host} blokuje w tym przebiegu", file=sys.stderr)
             continue
-        if i > 0:
+        if attempted > 0:
             human_pause()
+        attempted += 1
         try:
             data = fetch_product(session, url)
             blocked[host] = 0
+            cooldowns.pop(host, None)
             data["timestamp"] = timestamp
             rows.append(data)
             print(f"OK  [{data['shop']}] {data['title']!r} -> cena: {data['price']}, promo: {data['sale_price']}")
-        except Exception as exc:  # noqa: BLE001 - chcemy zebrac reszte produktow nawet po bledzie
-            status = getattr(getattr(exc, "response", None), "status_code", None)
-            if status in RETRY_STATUSES:
-                blocked[host] = blocked.get(host, 0) + 1
+        except Blocked as exc:
+            blocked[host] = blocked.get(host, 0) + 1
+            if blocked[host] >= MAX_SHOP_FAILURES:
+                streak = cooldown.get("streak", 0) + 1
+                pause = min(COOLDOWN_BASE * 2 ** (streak - 1), COOLDOWN_MAX) * random.uniform(0.8, 1.2)
+                cooldowns[host] = {"until": time.time() + pause, "streak": streak}
+                print(f"{host} blokuje - przerwa {pause / 3600:.1f} h, zmiana profilu przegladarki", file=sys.stderr)
             print(f"BLAD dla {url}: {exc}", file=sys.stderr)
+        except Exception as exc:  # noqa: BLE001 - chcemy zebrac reszte produktow nawet po bledzie
+            print(f"BLAD dla {url}: {exc}", file=sys.stderr)
+
+    if any(n >= MAX_SHOP_FAILURES for n in blocked.values()):
+        forget_identity(state)
+    else:
+        state["cookies"] = dump_cookies(session)
+    save_state(state)
 
     if rows:
         append_rows(rows)
         print(f"Zapisano {len(rows)} wierszy do {OUTPUT_CSV}")
+    elif attempted == 0:
+        print("Wszystkie sklepy odpoczywaja po blokadzie - nic nie pobieram.")
     else:
         sys.exit("Nie udalo sie pobrac zadnego produktu.")
 
