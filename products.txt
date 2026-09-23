@@ -1,0 +1,6 @@
+# Jeden URL produktu na linie. Linie zaczynajace sie od # sa ignorowane.
+https://www.mediaexpert.pl/telewizory-i-rtv/telewizory/telewizor-tcl-65a400u-65-qd-mini-led-4k-144-hz-vrr-google-tv-dolby-atmos-dolby-vision-hdmi-2-1
+
+# Dodaj kolejne produkty w ten sam sposob:
+# https://www.mediaexpert.pl/.../produkt-2
+# https://www.mediaexpert.pl/.../produkt-3

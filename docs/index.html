@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Monitor cen - Media Expert</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3.0.0/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
+<style>
+  :root { color-scheme: light dark; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    max-width: 1000px;
+    margin: 2rem auto;
+    padding: 0 1rem;
+    background: #fafafa;
+    color: #1a1a1a;
+  }
+  @media (prefers-color-scheme: dark) {
+    body { background: #121212; color: #eee; }
+    .card { background: #1e1e1e !important; }
+    select { background: #222; color: #eee; border-color: #444; }
+  }
+  h1 { font-size: 1.4rem; }
+  .card {
+    background: #fff;
+    border-radius: 10px;
+    padding: 1.2rem;
+    margin-bottom: 1.5rem;
+    box-shadow: 0 1px 3px rgba(0,0,0,.1);
+  }
+  select { padding: .4rem; border-radius: 6px; margin-bottom: 1rem; }
+  .stat { display: inline-block; margin-right: 2rem; }
+  .stat b { display: block; font-size: 1.3rem; }
+  .updated { color: #888; font-size: .85rem; }
+</style>
+</head>
+<body>
+
+<h1>📉 Monitor cen produktów</h1>
+<p class="updated" id="lastUpdate">Wczytywanie danych...</p>
+
+<div class="card">
+  <label for="productSelect">Produkt:</label>
+  <select id="productSelect"></select>
+  <div id="stats"></div>
+  <canvas id="priceChart" height="100"></canvas>
+</div>
+
+<script>
+const CSV_URL = '../data/prices.csv'; // ten sam repo, katalog data/
+
+async function loadCSV() {
+  const res = await fetch(CSV_URL);
+  const text = await res.text();
+  const lines = text.trim().split('\n');
+  const headers = lines[0].split(',');
+  return lines.slice(1).map(line => {
+    // prosty parser CSV (bez obslugi przecinkow w cudzyslowach - nasze dane ich nie majа)
+    const cells = line.split(',');
+    const row = {};
+    headers.forEach((h, i) => row[h] = cells[i]);
+    return row;
+  });
+}
+
+function groupByProduct(rows) {
+  const grouped = {};
+  for (const row of rows) {
+    const key = row.part_no || row.title || row.url;
+    if (!grouped[key]) grouped[key] = { title: row.title, rows: [] };
+    grouped[key].rows.push(row);
+  }
+  return grouped;
+}
+
+let chart;
+
+function renderChart(rows, title) {
+  const labels = rows.map(r => r.timestamp);
+  const price = rows.map(r => parseFloat(r.price));
+  const salePrice = rows.map(r => r.sale_price ? parseFloat(r.sale_price) : null);
+
+  if (chart) chart.destroy();
+  chart = new Chart(document.getElementById('priceChart'), {
+    type: 'line',
+    data: {
+      labels,
+      datasets: [
+        { label: 'Cena regularna', data: price, borderColor: '#888', tension: 0.1 },
+        { label: 'Cena promocyjna', data: salePrice, borderColor: '#e63946', tension: 0.1 },
+      ]
+    },
+    options: {
+      responsive: true,
+      plugins: { title: { display: true, text: title } },
+      scales: {
+        x: { type: 'time', time: { unit: 'hour' } },
+        y: { title: { display: true, text: 'zł' } }
+      }
+    }
+  });
+
+  const last = rows[rows.length - 1];
+  const min = Math.min(...price.filter(p => !isNaN(p)));
+  document.getElementById('stats').innerHTML = `
+    <div class="stat">Aktualna cena<b>${last.price} zł</b></div>
+    <div class="stat">Promo<b>${last.sale_price || '-'} zł</b></div>
+    <div class="stat">Najniższa odnotowana<b>${min} zł</b></div>
+  `;
+}
+
+(async function init() {
+  const rows = await loadCSV();
+  const grouped = groupByProduct(rows);
+  const select = document.getElementById('productSelect');
+
+  Object.entries(grouped).forEach(([key, group]) => {
+    const opt = document.createElement('option');
+    opt.value = key;
+    opt.textContent = group.title || key;
+    select.appendChild(opt);
+  });
+
+  function showSelected() {
+    const key = select.value;
+    renderChart(grouped[key].rows, grouped[key].title);
+  }
+
+  select.addEventListener('change', showSelected);
+  showSelected();
+
+  const lastRow = rows[rows.length - 1];
+  document.getElementById('lastUpdate').textContent =
+    'Ostatnia aktualizacja: ' + (lastRow ? lastRow.timestamp : 'brak danych');
+})();
+</script>
+
+</body>
+</html>
