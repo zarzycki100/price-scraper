@@ -33,7 +33,7 @@ GitHub Pages.
 ## Struktura plików
 
 ```
-scraper.py                     - skrypt scrapujący (requests + BeautifulSoup)
+scraper.py                     - skrypt scrapujący (curl_cffi + BeautifulSoup)
 products.txt                   - lista URL-i produktów do monitorowania
 requirements.txt               - zależności Pythona
 data/prices.csv                - historia cen (tworzona automatycznie)
@@ -48,9 +48,10 @@ docs/index.html                - strona z wykresem (Chart.js) dla GitHub Pages
 - GitHub automatycznie **wyłącza scheduled workflows po ~60 dniach** bez
   żadnego commitu w repo — wystarczy wtedy zrobić dowolny commit, żeby je
   reaktywować.
-- Jeśli Media Expert zablokuje request (np. przez ochronę anty-bot), warto
-  rozważyć rotację User-Agentów lub dodanie losowego opóźnienia między
-  requestami — na razie skrypt zakłada, że pojedynczy request z nagłówkami
-  przeglądarki przechodzi bez problemu.
+- Media Expert stoi za Cloudflare, który zwykłe `requests` odrzuca kodem 403
+  (`cf-mitigated: challenge`). Dlatego skrypt używa `curl_cffi`, który
+  podszywa się pod przeglądarkę Chrome (odcisk TLS/HTTP2). Jeśli 403 wróci,
+  można spróbować innej wartości `IMPERSONATE` w `scraper.py`
+  (np. `"safari"`, `"firefox"`) albo zaktualizować `curl_cffi`.
 - Dane w CSV rosną w nieskończoność. Przy bardzo długim monitorowaniu warto
   rozważyć okresowe archiwizowanie starszych wpisów.

@@ -1,0 +1,45 @@
+name: Scrape prices
+
+on:
+  schedule:
+    - cron: "*/15 * * * *" # co 15 min (UTC, GitHub moze opoznic start o kilka minut)
+  workflow_dispatch: # reczne uruchomienie z zakladki Actions
+
+permissions:
+  contents: write # potrzebne do commitowania data/prices.csv
+
+# Nie dopuszczamy do rownoleglych przebiegow - dwa naraz pokloca sie przy push.
+concurrency:
+  group: scrape
+  cancel-in-progress: false
+
+jobs:
+  scrape:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run scraper
+        run: python scraper.py
+
+      - name: Commit data
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add data/prices.csv
+          if git diff --cached --quiet; then
+            echo "Brak zmian w danych."
+            exit 0
+          fi
+          git commit -m "Aktualizacja cen $(date -u +'%Y-%m-%d %H:%M') UTC"
+          git pull --rebase
+          git push

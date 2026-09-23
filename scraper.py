@@ -10,23 +10,28 @@ Uruchamiane co 15 min przez GitHub Actions (.github/workflows/scrape.yml).
 """
 
 import csv
+import random
 import sys
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 
-import requests
 from bs4 import BeautifulSoup
+from curl_cffi import requests
 
 PRODUCTS_FILE = Path("products.txt")
 OUTPUT_CSV = Path("data/prices.csv")
 
+# Media Expert stoi za Cloudflare, ktory odrzuca (403, "cf-mitigated: challenge")
+# zwykle requests/urllib po odcisku TLS/HTTP2. curl_cffi podszywa sie pod
+# prawdziwa przegladarke (TLS, HTTP/2, naglowki), wiec przechodzi bez challenge.
+IMPERSONATE = "chrome"
+
+# Losowa przerwa (w sekundach) miedzy kolejnymi produktami - rowne odstepy
+# co do milisekundy to typowy slad bota.
+DELAY_RANGE = (3, 10)
+
 HEADERS = {
-    # Realistyczny User-Agent - Media Expert moze blokowac requesty bez niego
-    "User-Agent": (
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-        "AppleWebKit/537.36 (KHTML, like Gecko) "
-        "Chrome/124.0.0.0 Safari/537.36"
-    ),
     "Accept-Language": "pl-PL,pl;q=0.9,en;q=0.8",
 }
 
@@ -52,7 +57,7 @@ def load_products(path: Path) -> list[str]:
 
 def fetch_product(url: str) -> dict:
     """Pobiera strone produktu i wyciaga dane cenowe z meta-tagow <meta property=...>."""
-    resp = requests.get(url, headers=HEADERS, timeout=20)
+    resp = requests.get(url, headers=HEADERS, impersonate=IMPERSONATE, timeout=20)
     resp.raise_for_status()
     soup = BeautifulSoup(resp.text, "html.parser")
 
@@ -103,7 +108,9 @@ def main() -> None:
     timestamp = datetime.now(timezone.utc).isoformat(timespec="seconds")
 
     rows = []
-    for url in urls:
+    for i, url in enumerate(urls):
+        if i > 0:
+            time.sleep(random.uniform(*DELAY_RANGE))
         try:
             data = fetch_product(url)
             data["timestamp"] = timestamp

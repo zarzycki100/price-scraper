@@ -48,18 +48,63 @@
 </div>
 
 <script>
-const CSV_URL = '../data/prices.csv'; // ten sam repo, katalog data/
+const BRANCH = 'main';
+
+// Kandydaci na lokalizacje CSV, sprawdzani po kolei:
+// 1. ../data/prices.csv - dziala lokalnie i gdy Pages serwuje katalog glowny repo,
+// 2. raw.githubusercontent.com - dziala, gdy Pages serwuje tylko /docs
+//    (wtedy data/ nie jest publikowane). Login i repo wyciagane z adresu strony.
+function csvCandidates() {
+  const urls = ['../data/prices.csv'];
+  const m = location.hostname.match(/^([^.]+)\.github\.io$/);
+  const repo = location.pathname.split('/').filter(Boolean)[0];
+  if (m && repo) {
+    urls.push(`https://raw.githubusercontent.com/${m[1]}/${repo}/${BRANCH}/data/prices.csv`);
+  }
+  return urls;
+}
+
+async function fetchCSVText() {
+  for (const url of csvCandidates()) {
+    try {
+      const res = await fetch(url, { cache: 'no-store' });
+      if (res.ok) return await res.text();
+    } catch (e) { /* probujemy nastepnego kandydata */ }
+  }
+  throw new Error('Nie znaleziono pliku data/prices.csv');
+}
+
+// Parser CSV zgodny z RFC 4180 (pola w cudzyslowach, przecinki i "" w srodku) -
+// tytuly produktow z Media Expert zawieraja przecinki.
+function parseCSV(text) {
+  const records = [];
+  let row = [], field = '', inQuotes = false;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (inQuotes) {
+      if (c === '"' && text[i + 1] === '"') { field += '"'; i++; }
+      else if (c === '"') inQuotes = false;
+      else field += c;
+    } else if (c === '"') inQuotes = true;
+    else if (c === ',') { row.push(field); field = ''; }
+    else if (c === '\n' || c === '\r') {
+      if (c === '\r' && text[i + 1] === '\n') i++;
+      row.push(field); field = '';
+      if (row.length > 1 || row[0] !== '') records.push(row);
+      row = [];
+    } else field += c;
+  }
+  row.push(field);
+  if (row.length > 1 || row[0] !== '') records.push(row);
+  return records;
+}
 
 async function loadCSV() {
-  const res = await fetch(CSV_URL);
-  const text = await res.text();
-  const lines = text.trim().split('\n');
-  const headers = lines[0].split(',');
-  return lines.slice(1).map(line => {
-    // prosty parser CSV (bez obslugi przecinkow w cudzyslowach - nasze dane ich nie majа)
-    const cells = line.split(',');
+  const [headers, ...records] = parseCSV(await fetchCSVText());
+  if (!headers) return [];
+  return records.map(cells => {
     const row = {};
-    headers.forEach((h, i) => row[h] = cells[i]);
+    headers.forEach((h, i) => row[h] = cells[i] ?? '');
     return row;
   });
 }
@@ -95,7 +140,8 @@ function renderChart(rows, title) {
       responsive: true,
       plugins: { title: { display: true, text: title } },
       scales: {
-        x: { type: 'time', time: { unit: 'hour' } },
+        // bez sztywnego unit - Chart.js sam dobierze godziny/dni/miesiace do zakresu danych
+        x: { type: 'time', time: { tooltipFormat: 'dd.MM.yyyy HH:mm' } },
         y: { title: { display: true, text: 'zł' } }
       }
     }
@@ -111,7 +157,19 @@ function renderChart(rows, title) {
 }
 
 (async function init() {
-  const rows = await loadCSV();
+  const status = document.getElementById('lastUpdate');
+  let rows;
+  try {
+    rows = await loadCSV();
+  } catch (e) {
+    status.textContent = 'Błąd wczytywania danych: ' + e.message;
+    return;
+  }
+  if (rows.length === 0) {
+    status.textContent = 'Brak danych - scraper jeszcze nic nie zapisał.';
+    return;
+  }
+
   const grouped = groupByProduct(rows);
   const select = document.getElementById('productSelect');
 
@@ -131,8 +189,8 @@ function renderChart(rows, title) {
   showSelected();
 
   const lastRow = rows[rows.length - 1];
-  document.getElementById('lastUpdate').textContent =
-    'Ostatnia aktualizacja: ' + (lastRow ? lastRow.timestamp : 'brak danych');
+  status.textContent = 'Ostatnia aktualizacja: ' +
+    new Date(lastRow.timestamp).toLocaleString('pl-PL');
 })();
 </script>
 
