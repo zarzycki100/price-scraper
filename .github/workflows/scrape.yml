@@ -1,11 +1,10 @@
 name: Scrape prices
 
+# Harmonogram wylaczony: sklepy blokuja (403) adresy IP runnerow GitHuba.
+# Cykliczne pobieranie robi lokalny cron - scripts/cron_scrape.sh.
+# Ten workflow zostaje do recznego uruchamiania z zakladki Actions.
 on:
-  schedule:
-    # co 15 min, ale przesuniete z pelnych kwadransow (:00/:15/:30/:45), kiedy
-    # startuje wiekszosc workflowow na GitHubie i opoznienia sa najwieksze (UTC)
-    - cron: "7,22,37,52 * * * *"
-  workflow_dispatch: # reczne uruchomienie z zakladki Actions
+  workflow_dispatch:
 
 permissions:
   contents: write # potrzebne do commitowania data/prices.csv

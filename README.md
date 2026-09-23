@@ -1,7 +1,7 @@
 # Monitor cen Media Expert i RTV Euro AGD
 
 Automatyczny scraper cen produktów z mediaexpert.pl i euro.com.pl, uruchamiany co 15 minut
-przez GitHub Actions, z historią zapisywaną do CSV i wizualizacją na
+przez crona na lokalnym komputerze, z historią zapisywaną do CSV i wizualizacją na
 GitHub Pages.
 
 ## Jak uruchomić
@@ -27,8 +27,19 @@ GitHub Pages.
 5. **Odpal workflow ręcznie pierwszy raz**, żeby sprawdzić, czy działa:
    zakładka „Actions” → „Scrape prices” → „Run workflow”.
 
-6. Od tego momentu workflow uruchamia się automatycznie co 15 minut,
-   dopisuje nowe wiersze do `data/prices.csv` i commituje je do repo.
+6. **Dodaj lokalnego crona** (sklepy blokują adresy IP GitHub Actions,
+   więc cykliczne pobieranie działa z Twojego komputera):
+   ```
+   gh auth login        # jednorazowo - cron pushuje przez token gh (HTTPS)
+   pip install --user -r requirements.txt
+   crontab -e
+   # dopisz:
+   */15 * * * * /sciezka/do/repo/scripts/cron_scrape.sh
+   ```
+   Skrypt pracuje na osobnym klonie repo (`~/.local/share/price-scraper-cron`),
+   więc nie rusza Twojej kopii roboczej. Dopisuje wiersze do
+   `data/prices.csv`, commituje i pushuje je do repo.
+   Log: `~/.local/state/price-scraper/cron.log`.
    Strona na GitHub Pages odczytuje ten plik na żywo i ma dwa widoki:
    - **Produkt** — historia ceny regularnej i promocyjnej jednego produktu
      (lista pogrupowana po sklepach, z oznaczeniem sklepu i linkiem),
@@ -52,16 +63,17 @@ products.txt                   - lista URL-i produktów do monitorowania
 requirements.txt               - zależności Pythona
 data/prices.csv                - historia cen (tworzona automatycznie)
 docs/index.html                - strona z wykresem (Chart.js) dla GitHub Pages
-.github/workflows/scrape.yml   - harmonogram GitHub Actions (co 15 min)
+scripts/cron_scrape.sh         - uruchamianie z lokalnego crona (co 15 min)
+.github/workflows/scrape.yml   - ręczne uruchomienie w GitHub Actions
 ```
 
 ## Uwagi
 
-- Harmonogram cron w GitHub Actions działa w **UTC** i nie jest gwarantowany
-  co do minuty — przy dużym obciążeniu GitHub może przesunąć start o kilka minut.
-- GitHub automatycznie **wyłącza scheduled workflows po ~60 dniach** bez
-  żadnego commitu w repo — wystarczy wtedy zrobić dowolny commit, żeby je
-  reaktywować.
+- Z runnerów GitHub Actions oba sklepy odpowiadają zwykle **403** — blokują
+  adresy IP centrów danych, nie sam kod. Dlatego harmonogram w Actions jest
+  wyłączony, a workflow zostaje tylko do ręcznego uruchamiania.
+- Cron działa tylko, gdy komputer jest włączony (i nie uśpiony) — przerwy
+  będą widoczne jako luki na wykresie.
 - Media Expert stoi za Cloudflare, który zwykłe `requests` odrzuca kodem 403
   (`cf-mitigated: challenge`). Dlatego skrypt używa `curl_cffi`, który
   podszywa się pod przeglądarkę Chrome (odcisk TLS/HTTP2). Jeśli 403 wróci,
