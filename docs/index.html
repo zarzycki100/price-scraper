@@ -3,52 +3,205 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Monitor cen - Media Expert</title>
+<title>Monitor cen</title>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3.0.0/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
 <style>
-  :root { color-scheme: light dark; }
+  :root {
+    color-scheme: light;
+    --bg: #f4f4f2;
+    --surface: #fcfcfb;
+    --border: #e2e1dc;
+    --text: #0b0b0b;
+    --text-2: #52514e;
+    --text-3: #7a7974;
+    --grid: #ecebe7;
+    --accent: #2a78d6;
+    --chip-bg: #ecebe7;
+    /* paleta kategoryczna - stala kolejnosc, zwalidowana pod daltonizm */
+    --s1: #2a78d6; --s2: #eb6834; --s3: #1baf7a; --s4: #eda100;
+    --s5: #e87ba4; --s6: #008300; --s7: #4a3aa7; --s8: #e34948;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      color-scheme: dark;
+      --bg: #121211;
+      --surface: #1a1a19;
+      --border: #2e2e2c;
+      --text: #ffffff;
+      --text-2: #c3c2b7;
+      --text-3: #93928a;
+      --grid: #2a2a28;
+      --accent: #3987e5;
+      --chip-bg: #2e2e2c;
+      --s1: #3987e5; --s2: #d95926; --s3: #199e70; --s4: #c98500;
+      --s5: #d55181; --s6: #008300; --s7: #9085e9; --s8: #e66767;
+    }
+  }
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+    --bg: #121211;
+    --surface: #1a1a19;
+    --border: #2e2e2c;
+    --text: #ffffff;
+    --text-2: #c3c2b7;
+    --text-3: #93928a;
+    --grid: #2a2a28;
+    --accent: #3987e5;
+    --chip-bg: #2e2e2c;
+    --s1: #3987e5; --s2: #d95926; --s3: #199e70; --s4: #c98500;
+    --s5: #d55181; --s6: #008300; --s7: #9085e9; --s8: #e66767;
+  }
+
+  * { box-sizing: border-box; }
   body {
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
     max-width: 1000px;
-    margin: 2rem auto;
-    padding: 0 1rem;
-    background: #fafafa;
-    color: #1a1a1a;
+    margin: 0 auto;
+    padding: 2rem 16px;
+    background: var(--bg);
+    color: var(--text);
   }
-  @media (prefers-color-scheme: dark) {
-    body { background: #121212; color: #eee; }
-    .card { background: #1e1e1e !important; }
-    select { background: #222; color: #eee; border-color: #444; }
+  h1 { font-size: 1.4rem; margin: 0 0 .25rem; }
+  a { color: var(--accent); }
+  .updated { color: var(--text-3); font-size: .85rem; margin: 0 0 1.25rem; }
+
+  .tabs { display: flex; gap: .25rem; margin-bottom: 1rem; border-bottom: 1px solid var(--border); }
+  .tab {
+    font: inherit; font-size: .95rem;
+    background: none; border: 0; border-bottom: 2px solid transparent;
+    color: var(--text-2); padding: .5rem .75rem; cursor: pointer; margin-bottom: -1px;
   }
-  h1 { font-size: 1.4rem; }
+  .tab[aria-selected="true"] { color: var(--text); border-bottom-color: var(--accent); font-weight: 600; }
+
   .card {
-    background: #fff;
+    background: var(--surface);
+    border: 1px solid var(--border);
     border-radius: 10px;
     padding: 1.2rem;
     margin-bottom: 1.5rem;
-    box-shadow: 0 1px 3px rgba(0,0,0,.1);
   }
-  select { padding: .4rem; border-radius: 6px; margin-bottom: 1rem; }
-  .stat { display: inline-block; margin-right: 2rem; }
-  .stat b { display: block; font-size: 1.3rem; }
-  .updated { color: #888; font-size: .85rem; }
+  .controls { display: flex; flex-wrap: wrap; gap: .75rem 1.25rem; align-items: center; margin-bottom: 1rem; }
+  .controls label { color: var(--text-2); font-size: .9rem; display: flex; gap: .5rem; align-items: center; }
+  select {
+    font: inherit; font-size: .9rem; padding: .4rem; border-radius: 6px; max-width: 100%;
+    background: var(--surface); color: var(--text); border: 1px solid var(--border);
+  }
+  .product-select { flex: 1 1 320px; min-width: 0; }
+  .product-select select { flex: 1; min-width: 0; }
+
+  .chip {
+    display: inline-block; font-size: .75rem; font-weight: 600; letter-spacing: .02em;
+    background: var(--chip-bg); color: var(--text-2);
+    border-radius: 999px; padding: .15rem .6rem; white-space: nowrap;
+  }
+  .product-head { display: flex; flex-wrap: wrap; gap: .5rem; align-items: baseline; margin-bottom: .75rem; }
+  .product-head a { font-size: .9rem; }
+
+  .stats { display: flex; flex-wrap: wrap; gap: .75rem 2rem; margin-bottom: 1rem; }
+  .stat { color: var(--text-2); font-size: .85rem; }
+  .stat b { display: block; font-size: 1.3rem; color: var(--text); font-variant-numeric: tabular-nums; }
+
+  .chart-box { position: relative; height: 360px; }
+  @media (max-width: 600px) { .chart-box { height: 280px; } }
+
+  .hint { color: var(--text-3); font-size: .8rem; margin: .5rem 0 0; }
+
+  /* Legenda porownania - osobny blok POD wykresem, zeby nie zaslaniac linii */
+  .legend-wrap { margin-top: 1rem; border-top: 1px solid var(--border); padding-top: .75rem; }
+  .legend-actions { display: flex; gap: .75rem; margin-bottom: .5rem; font-size: .85rem; }
+  .linkbtn { font: inherit; background: none; border: 0; padding: 0; color: var(--accent); cursor: pointer; }
+  table.legend { width: 100%; border-collapse: collapse; font-size: .9rem; }
+  table.legend th {
+    text-align: left; font-weight: 600; color: var(--text-3); font-size: .75rem;
+    text-transform: uppercase; letter-spacing: .04em; padding: .25rem .5rem;
+  }
+  table.legend td { padding: .45rem .5rem; border-top: 1px solid var(--border); vertical-align: middle; }
+  table.legend .num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  table.legend tr.off td { opacity: .45; }
+  table.legend tr:hover td { background: var(--chip-bg); }
+  .toggle { display: flex; align-items: center; gap: .6rem; cursor: pointer; }
+  .toggle input { margin: 0; }
+  .swatch { flex: none; width: 28px; height: 12px; }
+  .name { overflow-wrap: anywhere; }
+  .name a { color: var(--text); text-decoration: none; }
+  .name a:hover { color: var(--accent); text-decoration: underline; }
+  .name .ext { color: var(--text-3); font-size: .8em; }
+  @media (max-width: 600px) { table.legend .opt { display: none; } }
+
+  .empty { color: var(--text-2); padding: 2rem 0; text-align: center; }
+  [hidden] { display: none !important; }
 </style>
 </head>
 <body>
 
-<h1>📉 Monitor cen produktów</h1>
+<h1>Monitor cen produktów</h1>
 <p class="updated" id="lastUpdate">Wczytywanie danych...</p>
 
-<div class="card">
-  <label for="productSelect">Produkt:</label>
-  <select id="productSelect"></select>
-  <div id="stats"></div>
-  <canvas id="priceChart" height="100"></canvas>
+<div class="tabs" role="tablist">
+  <button class="tab" role="tab" id="tab-product" aria-selected="true" aria-controls="view-product">Produkt</button>
+  <button class="tab" role="tab" id="tab-compare" aria-selected="false" aria-controls="view-compare">Porównanie w sklepie</button>
 </div>
+
+<section id="view-product" role="tabpanel" aria-labelledby="tab-product">
+  <div class="card">
+    <div class="controls">
+      <label class="product-select">Produkt:
+        <select id="productSelect"></select>
+      </label>
+    </div>
+    <div class="product-head">
+      <span class="chip" id="productShop"></span>
+      <a id="productLink" target="_blank" rel="noopener">Otwórz w sklepie ↗</a>
+    </div>
+    <div class="stats" id="stats"></div>
+    <div class="chart-box"><canvas id="priceChart"></canvas></div>
+  </div>
+</section>
+
+<section id="view-compare" role="tabpanel" aria-labelledby="tab-compare" hidden>
+  <div class="card">
+    <div class="controls">
+      <label>Sklep:
+        <select id="shopSelect"></select>
+      </label>
+      <label>Cena:
+        <select id="priceMode">
+          <option value="effective">aktualna (z promocją)</option>
+          <option value="regular">regularna</option>
+        </select>
+      </label>
+    </div>
+    <div class="chart-box"><canvas id="compareChart"></canvas></div>
+    <div class="legend-wrap">
+      <div class="legend-actions">
+        <button class="linkbtn" id="showAll">Pokaż wszystkie</button>
+        <button class="linkbtn" id="hideAll">Ukryj wszystkie</button>
+      </div>
+      <table class="legend">
+        <thead>
+          <tr>
+            <th>Produkt</th>
+            <th class="num">Teraz</th>
+            <th class="num opt">Najniższa</th>
+            <th class="num opt">Najwyższa</th>
+          </tr>
+        </thead>
+        <tbody id="legendBody"></tbody>
+      </table>
+      <p class="hint">Pole wyboru ukrywa lub pokazuje linię produktu. Nazwa otwiera stronę produktu w sklepie.</p>
+    </div>
+  </div>
+</section>
 
 <script>
 const BRANCH = 'main';
+
+// Nazwy sklepow dla starszych wierszy CSV bez kolumny "shop".
+const SHOP_BY_HOST = {
+  'www.mediaexpert.pl': 'Media Expert',
+  'www.euro.com.pl': 'RTV Euro AGD',
+};
 
 // Kandydaci na lokalizacje CSV, sprawdzani po kolei:
 // 1. ../data/prices.csv - dziala lokalnie i gdy Pages serwuje katalog glowny repo,
@@ -75,7 +228,7 @@ async function fetchCSVText() {
 }
 
 // Parser CSV zgodny z RFC 4180 (pola w cudzyslowach, przecinki i "" w srodku) -
-// tytuly produktow z Media Expert zawieraja przecinki.
+// tytuly produktow zawieraja przecinki.
 function parseCSV(text) {
   const records = [];
   let row = [], field = '', inQuotes = false;
@@ -109,52 +262,281 @@ async function loadCSV() {
   });
 }
 
-function groupByProduct(rows) {
-  const grouped = {};
-  for (const row of rows) {
-    const key = row.part_no || row.title || row.url;
-    if (!grouped[key]) grouped[key] = { title: row.title, rows: [] };
-    grouped[key].rows.push(row);
-  }
-  return grouped;
+function hostOf(url) {
+  try { return new URL(url).hostname; } catch (e) { return ''; }
 }
 
-let chart;
+function safeUrl(url) {
+  return /^https?:\/\//i.test(url || '') ? url : null;
+}
 
-function renderChart(rows, title) {
-  const labels = rows.map(r => r.timestamp);
-  const price = rows.map(r => parseFloat(r.price));
-  const salePrice = rows.map(r => r.sale_price ? parseFloat(r.sale_price) : null);
+// Starsze wiersze maja w tytule dopiski SEO sklepu - obcinamy je do wyswietlania.
+function cleanTitle(title) {
+  return (title || '')
+    .replace(/\s+-\s+niskie ceny i opinie w Media Expert$/i, '')
+    .replace(/\s+-\s+Opinie, Cena\s+-\s+RTV EURO AGD$/i, '')
+    .trim();
+}
 
-  if (chart) chart.destroy();
-  chart = new Chart(document.getElementById('priceChart'), {
+function num(v) {
+  const n = parseFloat(v);
+  return Number.isFinite(n) ? n : null;
+}
+
+// Grupowanie po sklepie + identyfikatorze, bo numery produktow moga sie
+// powtorzyc miedzy sklepami. Nazwa i link z najnowszego wiersza.
+function groupProducts(rows) {
+  const products = new Map();
+  for (const row of rows) {
+    const shop = row.shop || SHOP_BY_HOST[hostOf(row.url)] || hostOf(row.url) || 'Nieznany sklep';
+    const key = shop + '|' + (row.part_no || row.url || row.title);
+    if (!products.has(key)) products.set(key, { key, shop, rows: [] });
+    const p = products.get(key);
+    const point = {
+      t: new Date(row.timestamp),
+      price: num(row.price),
+      sale: num(row.sale_price),
+      availability: row.availability,
+    };
+    point.effective = point.sale ?? point.price;
+    p.rows.push(point);
+    p.title = cleanTitle(row.title) || p.title || row.url;
+    p.url = safeUrl(row.url) || p.url;
+  }
+  for (const p of products.values()) p.rows.sort((a, b) => a.t - b.t);
+  return products;
+}
+
+const fmtPrice = v => v == null ? '–' :
+  v.toLocaleString('pl-PL', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' zł';
+const fmtDate = d => d.toLocaleString('pl-PL', { dateStyle: 'short', timeStyle: 'short' });
+const shorten = (s, n) => s.length > n ? s.slice(0, n - 1) + '…' : s;
+
+function css(name) {
+  return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+}
+
+// 8 kolorow w stalej kolejnosci; od 9. produktu kolory wracaja, ale z innym
+// wzorem linii (kolor + wzor razem nadal jednoznacznie identyfikuja produkt).
+const DASHES = [[], [6, 4], [2, 3], [10, 3, 2, 3]];
+function seriesStyle(index) {
+  return {
+    color: css('--s' + (index % 8 + 1)),
+    dash: DASHES[Math.floor(index / 8) % DASHES.length],
+  };
+}
+
+function baseOptions(yTitle) {
+  const text2 = css('--text-2'), grid = css('--grid');
+  return {
+    responsive: true,
+    maintainAspectRatio: false,
+    interaction: { mode: 'nearest', axis: 'x', intersect: false },
+    elements: { point: { radius: 0, hoverRadius: 5, hitRadius: 8 }, line: { borderWidth: 2 } },
+    scales: {
+      // bez sztywnego unit - Chart.js sam dobierze godziny/dni/miesiace do zakresu danych
+      x: {
+        type: 'time',
+        time: {
+          tooltipFormat: 'dd.MM.yyyy HH:mm',
+          displayFormats: { minute: 'HH:mm', hour: 'dd.MM HH:mm', day: 'dd.MM', week: 'dd.MM', month: 'MM.yyyy' },
+        },
+        grid: { color: grid }, border: { color: grid },
+        ticks: { color: text2, maxRotation: 0, autoSkipPadding: 16 },
+      },
+      y: {
+        title: { display: true, text: yTitle, color: text2 },
+        grid: { color: grid }, border: { display: false },
+        ticks: { color: text2, callback: v => v.toLocaleString('pl-PL') },
+      },
+    },
+    plugins: {
+      legend: { labels: { color: text2, usePointStyle: true, pointStyle: 'line', boxWidth: 24 } },
+      tooltip: {
+        callbacks: { label: ctx => ` ${ctx.dataset.label}: ${fmtPrice(ctx.parsed.y)}` },
+      },
+    },
+  };
+}
+
+// ---------------- Widok: pojedynczy produkt ----------------
+
+let productChart;
+
+function renderProduct(p) {
+  document.getElementById('productShop').textContent = p.shop;
+  const link = document.getElementById('productLink');
+  link.hidden = !p.url;
+  if (p.url) link.href = p.url;
+
+  const regular = css('--s1'), promo = css('--s2');
+  const options = baseOptions('zł');
+  options.plugins.legend.position = 'top';
+
+  if (productChart) productChart.destroy();
+  productChart = new Chart(document.getElementById('priceChart'), {
     type: 'line',
     data: {
-      labels,
       datasets: [
-        { label: 'Cena regularna', data: price, borderColor: '#888', tension: 0.1 },
-        { label: 'Cena promocyjna', data: salePrice, borderColor: '#e63946', tension: 0.1 },
-      ]
+        {
+          label: 'Cena regularna',
+          data: p.rows.map(r => ({ x: r.t, y: r.price })),
+          borderColor: regular, backgroundColor: regular, stepped: 'before',
+        },
+        {
+          label: 'Cena promocyjna',
+          data: p.rows.map(r => ({ x: r.t, y: r.sale })),
+          borderColor: promo, backgroundColor: promo, stepped: 'before', spanGaps: false,
+        },
+      ],
     },
-    options: {
-      responsive: true,
-      plugins: { title: { display: true, text: title } },
-      scales: {
-        // bez sztywnego unit - Chart.js sam dobierze godziny/dni/miesiace do zakresu danych
-        x: { type: 'time', time: { tooltipFormat: 'dd.MM.yyyy HH:mm' } },
-        y: { title: { display: true, text: 'zł' } }
-      }
-    }
+    options,
   });
 
-  const last = rows[rows.length - 1];
-  const min = Math.min(...price.filter(p => !isNaN(p)));
-  document.getElementById('stats').innerHTML = `
-    <div class="stat">Aktualna cena<b>${last.price} zł</b></div>
-    <div class="stat">Promo<b>${last.sale_price || '-'} zł</b></div>
-    <div class="stat">Najniższa odnotowana<b>${min} zł</b></div>
-  `;
+  const last = p.rows[p.rows.length - 1];
+  const effective = p.rows.map(r => r.effective).filter(v => v != null);
+  const stats = [
+    ['Cena regularna', fmtPrice(last.price)],
+    ['Promocja', last.sale != null ? fmtPrice(last.sale) : '–'],
+    ['Najniższa odnotowana', fmtPrice(effective.length ? Math.min(...effective) : null)],
+    ['Dostępność', last.availability === 'available' ? 'dostępny' : (last.availability || '–')],
+  ];
+  const box = document.getElementById('stats');
+  box.replaceChildren(...stats.map(([label, value]) => {
+    const div = document.createElement('div');
+    div.className = 'stat';
+    const b = document.createElement('b');
+    b.textContent = value;
+    div.append(label, b);
+    return div;
+  }));
 }
+
+// ---------------- Widok: porownanie w sklepie ----------------
+
+let compareChart;
+const hiddenKeys = new Set();
+
+function renderCompare(products, shop, mode) {
+  // kolejnosc = kolejnosc pojawienia sie produktu w danych, wiec kolor
+  // produktu nie zmienia sie przy ukrywaniu innych linii
+  const list = [...products.values()].filter(p => p.shop === shop);
+  const field = mode === 'regular' ? 'price' : 'effective';
+
+  const datasets = list.map((p, i) => {
+    const { color, dash } = seriesStyle(i);
+    return {
+      label: shorten(p.title, 60),
+      key: p.key,
+      data: p.rows.map(r => ({ x: r.t, y: r[field] })),
+      borderColor: color, backgroundColor: color, borderDash: dash,
+      stepped: 'before',
+      hidden: hiddenKeys.has(p.key),
+    };
+  });
+
+  const options = baseOptions('zł');
+  options.plugins.legend.display = false; // legenda jest w tabeli pod wykresem
+  if (compareChart) compareChart.destroy();
+  compareChart = new Chart(document.getElementById('compareChart'), {
+    type: 'line', data: { datasets }, options,
+  });
+
+  const body = document.getElementById('legendBody');
+  body.replaceChildren(...list.map((p, i) => {
+    const values = p.rows.map(r => r[field]).filter(v => v != null);
+    const last = p.rows[p.rows.length - 1][field];
+    const { color, dash } = seriesStyle(i);
+
+    const tr = document.createElement('tr');
+    tr.classList.toggle('off', hiddenKeys.has(p.key));
+
+    const tdName = document.createElement('td');
+    const label = document.createElement('label');
+    label.className = 'toggle';
+    const cb = document.createElement('input');
+    cb.type = 'checkbox';
+    cb.checked = !hiddenKeys.has(p.key);
+    cb.setAttribute('aria-label', 'Pokaż na wykresie: ' + p.title);
+    cb.addEventListener('change', () => setVisible(p.key, cb.checked, tr));
+
+    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    svg.setAttribute('class', 'swatch');
+    svg.setAttribute('viewBox', '0 0 28 12');
+    const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+    Object.entries({ x1: 1, y1: 6, x2: 27, y2: 6, stroke: color, 'stroke-width': 3,
+      'stroke-linecap': 'round', 'stroke-dasharray': dash.join(' ') || 'none' })
+      .forEach(([k, v]) => line.setAttribute(k, v));
+    svg.appendChild(line);
+
+    const name = document.createElement('span');
+    name.className = 'name';
+    if (p.url) {
+      const a = document.createElement('a');
+      a.href = p.url; a.target = '_blank'; a.rel = 'noopener';
+      a.textContent = p.title;
+      a.title = p.url;
+      const ext = document.createElement('span');
+      ext.className = 'ext';
+      ext.textContent = ' ↗';
+      a.appendChild(ext);
+      // klik w link nie przelacza widocznosci linii
+      a.addEventListener('click', e => e.stopPropagation());
+      name.appendChild(a);
+    } else {
+      name.textContent = p.title;
+    }
+    label.append(cb, svg, name);
+    tdName.appendChild(label);
+
+    const cell = (v, cls) => {
+      const td = document.createElement('td');
+      td.className = cls;
+      td.textContent = fmtPrice(v);
+      return td;
+    };
+    tr.append(
+      tdName,
+      cell(last, 'num'),
+      cell(values.length ? Math.min(...values) : null, 'num opt'),
+      cell(values.length ? Math.max(...values) : null, 'num opt'),
+    );
+    return tr;
+  }));
+
+  if (list.length === 0) {
+    const tr = document.createElement('tr');
+    const td = document.createElement('td');
+    td.colSpan = 4;
+    td.className = 'empty';
+    td.textContent = 'Brak produktów z tego sklepu.';
+    tr.appendChild(td);
+    body.appendChild(tr);
+  }
+}
+
+function setVisible(key, visible, tr) {
+  if (visible) hiddenKeys.delete(key); else hiddenKeys.add(key);
+  tr.classList.toggle('off', !visible);
+  const idx = compareChart.data.datasets.findIndex(d => d.key === key);
+  if (idx >= 0) compareChart.setDatasetVisibility(idx, visible);
+  compareChart.update();
+}
+
+function setAllVisible(visible) {
+  document.querySelectorAll('#legendBody tr').forEach((tr, i) => {
+    const ds = compareChart.data.datasets[i];
+    if (!ds) return;
+    if (visible) hiddenKeys.delete(ds.key); else hiddenKeys.add(ds.key);
+    tr.classList.toggle('off', !visible);
+    const cb = tr.querySelector('input');
+    if (cb) cb.checked = visible;
+    compareChart.setDatasetVisibility(i, visible);
+  });
+  compareChart.update();
+}
+
+// ---------------- Start ----------------
 
 (async function init() {
   const status = document.getElementById('lastUpdate');
@@ -170,27 +552,62 @@ function renderChart(rows, title) {
     return;
   }
 
-  const grouped = groupByProduct(rows);
-  const select = document.getElementById('productSelect');
+  const products = groupProducts(rows);
+  const shops = [...new Set([...products.values()].map(p => p.shop))];
 
-  Object.entries(grouped).forEach(([key, group]) => {
-    const opt = document.createElement('option');
-    opt.value = key;
-    opt.textContent = group.title || key;
-    select.appendChild(opt);
-  });
-
-  function showSelected() {
-    const key = select.value;
-    renderChart(grouped[key].rows, grouped[key].title);
+  // lista produktow pogrupowana po sklepach
+  const productSelect = document.getElementById('productSelect');
+  for (const shop of shops) {
+    const group = document.createElement('optgroup');
+    group.label = shop;
+    for (const p of products.values()) {
+      if (p.shop !== shop) continue;
+      const opt = document.createElement('option');
+      opt.value = p.key;
+      opt.textContent = p.title;
+      group.appendChild(opt);
+    }
+    productSelect.appendChild(group);
   }
 
-  select.addEventListener('change', showSelected);
-  showSelected();
+  const shopSelect = document.getElementById('shopSelect');
+  for (const shop of shops) {
+    const count = [...products.values()].filter(p => p.shop === shop).length;
+    shopSelect.add(new Option(`${shop} (${count})`, shop));
+  }
+  const priceMode = document.getElementById('priceMode');
 
-  const lastRow = rows[rows.length - 1];
-  status.textContent = 'Ostatnia aktualizacja: ' +
-    new Date(lastRow.timestamp).toLocaleString('pl-PL');
+  const showProduct = () => renderProduct(products.get(productSelect.value));
+  const showCompare = () => renderCompare(products, shopSelect.value, priceMode.value);
+  productSelect.addEventListener('change', showProduct);
+  shopSelect.addEventListener('change', showCompare);
+  priceMode.addEventListener('change', showCompare);
+  document.getElementById('showAll').addEventListener('click', () => setAllVisible(true));
+  document.getElementById('hideAll').addEventListener('click', () => setAllVisible(false));
+
+  // zakladki; wykres rysujemy dopiero na widocznej zakladce, zeby mial wymiary
+  // adres strony#porownanie otwiera od razu zakladke porownania
+  const tabs = { product: showProduct, compare: showCompare };
+  const HASH = { product: '#produkt', compare: '#porownanie' };
+  function selectTab(name) {
+    for (const t of Object.keys(tabs)) {
+      document.getElementById('tab-' + t).setAttribute('aria-selected', String(t === name));
+      document.getElementById('view-' + t).hidden = t !== name;
+    }
+    tabs[name]();
+    history.replaceState(null, '', HASH[name]);
+  }
+  let current = Object.keys(HASH).find(t => HASH[t] === location.hash) || 'product';
+  document.getElementById('tab-product').addEventListener('click', () => selectTab(current = 'product'));
+  document.getElementById('tab-compare').addEventListener('click', () => selectTab(current = 'compare'));
+  selectTab(current);
+
+  // przerysowanie po zmianie motywu systemu (kolory wykresu biora sie z CSS)
+  window.matchMedia('(prefers-color-scheme: dark)')
+    .addEventListener('change', () => tabs[current]());
+
+  const lastTs = rows.reduce((m, r) => r.timestamp > m ? r.timestamp : m, '');
+  status.textContent = 'Ostatnia aktualizacja: ' + fmtDate(new Date(lastTs));
 })();
 </script>
 

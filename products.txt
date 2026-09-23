@@ -1,6 +1,10 @@
 # Jeden URL produktu na linie. Linie zaczynajace sie od # sa ignorowane.
+# Obslugiwane sklepy: mediaexpert.pl, euro.com.pl (sklep rozpoznawany po domenie).
+
+# Media Expert
 https://www.mediaexpert.pl/telewizory-i-rtv/telewizory/telewizor-tcl-65a400u-65-qd-mini-led-4k-144-hz-vrr-google-tv-dolby-atmos-dolby-vision-hdmi-2-1
 
-# Dodaj kolejne produkty w ten sam sposob:
-# https://www.mediaexpert.pl/.../produkt-2
-# https://www.mediaexpert.pl/.../produkt-3
+# RTV Euro AGD
+https://www.euro.com.pl/telewizory-led-lcd-plazmowe/lg-telewizor-oled65c54la.bhtml
+https://www.euro.com.pl/telewizory-led-lcd-plazmowe/samsung-qe55qn80fau.bhtml
+https://www.euro.com.pl/telefony-komorkowe/apple-iphone-18-pro-256gb-czarny.bhtml
