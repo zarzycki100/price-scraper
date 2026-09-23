@@ -2,9 +2,20 @@
 # Obslugiwane sklepy: mediaexpert.pl, euro.com.pl (sklep rozpoznawany po domenie).
 
 # Media Expert
-https://www.mediaexpert.pl/telewizory-i-rtv/telewizory/telewizor-tcl-65a400u-65-qd-mini-led-4k-144-hz-vrr-google-tv-dolby-atmos-dolby-vision-hdmi-2-1
 
 # RTV Euro AGD
-https://www.euro.com.pl/telewizory-led-lcd-plazmowe/lg-telewizor-oled65c54la.bhtml
-https://www.euro.com.pl/telewizory-led-lcd-plazmowe/samsung-qe55qn80fau.bhtml
-https://www.euro.com.pl/telefony-komorkowe/apple-iphone-18-pro-256gb-czarny.bhtml
+https://www.euro.com.pl/kable-i-adaptery-komputerowe/hama-200925-cat-6-f-utp-1-gbit-s-10m-szary.bhtml
+https://www.euro.com.pl/etui-do-telefonow/apple-silicone-case-do-iphone-16e-bialy.bhtml
+https://www.euro.com.pl/telefony-komorkowe/apple-iphone-17-pro-max-1tb-srebrny.bhtml
+https://www.euro.com.pl/glosniki-przenosne/xiaomi-glosnik-sound-outdoor-niebieski.bhtml
+https://www.euro.com.pl/routery/asus-router-asus-tuf-ax3000-v2.bhtml
+https://www.euro.com.pl/telefony-komorkowe/apple-iphone-16-plus-128gb-6-7-48mpix-utramaryna.bhtml
+https://www.euro.com.pl/garnki/zwieger-kompact-6-elementow.bhtml
+https://www.euro.com.pl/sluchawki/sony-mdr-zx110pa-rozowe.bhtml
+https://www.euro.com.pl/pralki/samsung-ww11db7b34gwu4-11kg-1400obr-min.bhtml
+https://www.euro.com.pl/sluchawki/philips-tah4209wt-00-nauszne-bluetooth-5-3-bialy.bhtml
+https://www.euro.com.pl/etui-do-ipada-i-tabletow-multimedialnych/logitech-combo-ipad-pro-13-m4-us-szary.bhtml
+https://www.euro.com.pl/podkladki-pod-mysz/corsair-podkladka-corsair-mm200-pro-xl.bhtml
+https://www.euro.com.pl/glosniki-przenosne/jbl-glosnik-bt-xtreme-5-moro.bhtml
+https://www.euro.com.pl/glosniki-przenosne/jbl-glosnik-bt-go-5-niebieski.bhtml
+https://www.euro.com.pl/telefony-komorkowe/apple-iphone-17e-256gb-6-1-48mpix-bialy.bhtml
