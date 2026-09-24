@@ -66,8 +66,14 @@
   a { color: var(--accent); }
   .updated { color: var(--text-3); font-size: .85rem; margin: 0 0 1.25rem; }
 
-  .tabs { display: flex; gap: .25rem; margin-bottom: 1rem; border-bottom: 1px solid var(--border); }
+  /* na waskim ekranie zakladki przewijaja sie w poziomie zamiast lamac sie w kilka linii */
+  .tabs {
+    display: flex; gap: .25rem; margin-bottom: 1rem; border-bottom: 1px solid var(--border);
+    overflow-x: auto; scrollbar-width: none;
+  }
+  .tabs::-webkit-scrollbar { display: none; }
   .tab {
+    flex: none; white-space: nowrap;
     font: inherit; font-size: .95rem;
     background: none; border: 0; border-bottom: 2px solid transparent;
     color: var(--text-2); padding: .5rem .75rem; cursor: pointer; margin-bottom: -1px;
@@ -140,6 +146,37 @@
   table.legend tr.cheapest td.now { font-weight: 700; }
   .muted { color: var(--text-3); }
 
+  /* Lista produktow: wiersz = produkt, kolumna = sklep */
+  .table-scroll { overflow-x: auto; }
+  table.matrix { width: 100%; border-collapse: collapse; font-size: .9rem; }
+  table.matrix th {
+    text-align: right; font-weight: 600; color: var(--text-3); font-size: .75rem;
+    text-transform: uppercase; letter-spacing: .04em; padding: .25rem .6rem; white-space: nowrap;
+  }
+  table.matrix th:first-child { text-align: left; }
+  table.matrix td { padding: .5rem .6rem; border-top: 1px solid var(--border); vertical-align: top; }
+  table.matrix tr:hover td { background: var(--chip-bg); }
+  table.matrix td.product { min-width: 12rem; overflow-wrap: anywhere; }
+  table.matrix td.product .linkbtn { color: var(--text); text-align: left; font-weight: 500; }
+  table.matrix td.product .linkbtn:hover { color: var(--accent); text-decoration: underline; }
+  table.matrix td.price { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
+  table.matrix td.price a { color: var(--text); text-decoration: none; }
+  table.matrix td.price a:hover { color: var(--accent); text-decoration: underline; }
+  table.matrix td.cheap { font-weight: 700; background: color-mix(in srgb, var(--s3) 14%, transparent); }
+  table.matrix td.off a { color: var(--text-3); }
+  .sub { display: block; font-size: .72rem; font-weight: 500; color: var(--text-3); }
+  .sub.promo { color: var(--s2); }
+  @media (max-width: 600px) {
+    table.matrix { font-size: .8rem; }
+    table.matrix th { white-space: normal; font-size: .7rem; padding: .25rem .35rem; text-transform: none; letter-spacing: 0; }
+    table.matrix td { padding: .45rem .35rem; }
+    table.matrix td.product { min-width: 6rem; }
+    table.matrix .sub { font-size: .66rem; }
+    table.matrix .cur, table.matrix .promo-word { display: none; } /* "zł" jest w naglowku */
+    .card { padding: .9rem .75rem; }
+  }
+  @media (min-width: 601px) { table.matrix .cur-head { display: none; } }
+
   .empty { color: var(--text-2); padding: 2rem 0; text-align: center; }
   [hidden] { display: none !important; }
 </style>
@@ -150,12 +187,26 @@
 <p class="updated" id="lastUpdate">Wczytywanie danych...</p>
 
 <div class="tabs" role="tablist">
-  <button class="tab" role="tab" id="tab-shops" aria-selected="true" aria-controls="view-shops">Porównanie sklepów</button>
+  <button class="tab" role="tab" id="tab-list" aria-selected="true" aria-controls="view-list">Lista produktów</button>
+  <button class="tab" role="tab" id="tab-shops" aria-selected="false" aria-controls="view-shops">Porównanie sklepów</button>
   <button class="tab" role="tab" id="tab-product" aria-selected="false" aria-controls="view-product">Produkt w sklepie</button>
   <button class="tab" role="tab" id="tab-compare" aria-selected="false" aria-controls="view-compare">Produkty w sklepie</button>
 </div>
 
-<section id="view-shops" role="tabpanel" aria-labelledby="tab-shops">
+<section id="view-list" role="tabpanel" aria-labelledby="tab-list">
+  <div class="card">
+    <div class="table-scroll">
+      <table class="matrix">
+        <thead><tr id="listHead"></tr></thead>
+        <tbody id="listBody"></tbody>
+      </table>
+    </div>
+    <p class="hint">Aktualne ceny (z promocją). Wyróżniona – najtańsza oferta wśród dostępnych.
+      Cena otwiera stronę produktu w sklepie, nazwa – wykres cen we wszystkich sklepach.</p>
+  </div>
+</section>
+
+<section id="view-shops" role="tabpanel" aria-labelledby="tab-shops" hidden>
   <div class="card">
     <div class="controls">
       <label class="product-select">Produkt:
@@ -403,6 +454,9 @@ function shopIndex(shop) {
 
 const fmtPrice = v => v == null ? '–' :
   v.toLocaleString('pl-PL', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' zł';
+// w liscie bez ",00" - wezsze kolumny na telefonie
+const fmtPriceShort = v => v == null ? '–' :
+  v.toLocaleString('pl-PL', { minimumFractionDigits: Number.isInteger(v) ? 0 : 2, maximumFractionDigits: 2 }) + ' zł';
 const fmtDate = d => d.toLocaleString('pl-PL', { dateStyle: 'short', timeStyle: 'short' });
 const shorten = (s, n) => s.length > n ? s.slice(0, n - 1) + '…' : s;
 
@@ -432,6 +486,7 @@ function baseOptions(yTitle) {
       x: {
         type: 'time',
         time: {
+          minUnit: 'minute', // przy jednym pomiarze Chart.js schodzil do milisekund
           tooltipFormat: 'dd.MM.yyyy HH:mm',
           displayFormats: { minute: 'HH:mm', hour: 'dd.MM HH:mm', day: 'dd.MM', week: 'dd.MM', month: 'MM.yyyy' },
         },
@@ -457,6 +512,69 @@ function baseOptions(yTitle) {
 // wtedy pokazujemy kropke, zeby nowy produkt / sklep byl widoczny na wykresie.
 const singlePoint = rows => rows.length < 2 ? { pointRadius: 4 } : {};
 
+// ---------------- Widok: lista produktow ----------------
+
+function renderList(groups, shops, openGroup) {
+  const head = document.getElementById('listHead');
+  head.replaceChildren(...['Produkt', ...shops].map((text, i) => {
+    const th = document.createElement('th');
+    th.textContent = text;
+    if (i === 0) {
+      const cur = document.createElement('span');
+      cur.className = 'sub cur-head';
+      cur.textContent = 'ceny w zł';
+      th.appendChild(cur);
+    }
+    return th;
+  }));
+
+  const body = document.getElementById('listBody');
+  body.replaceChildren(...[...groups].map(([name, offers]) => {
+    const tr = document.createElement('tr');
+    const tdName = document.createElement('td');
+    tdName.className = 'product';
+    const btn = document.createElement('button');
+    btn.className = 'linkbtn';
+    btn.textContent = shorten(name, 80);
+    btn.title = name;
+    btn.addEventListener('click', () => openGroup(name));
+    tdName.appendChild(btn);
+    tr.appendChild(tdName);
+
+    const { bestPrice } = compareOffers(offers, 'effective');
+    for (const shop of shops) {
+      const td = document.createElement('td');
+      td.className = 'price';
+      const p = offers.find(o => o.shop === shop);
+      if (!p) {
+        td.classList.add('muted');
+        td.textContent = '–';
+        tr.appendChild(td);
+        continue;
+      }
+      const last = p.rows[p.rows.length - 1];
+      const a = document.createElement('a');
+      a.href = p.url || '#'; a.target = '_blank'; a.rel = 'noopener';
+      a.textContent = fmtPriceShort(last.effective).replace(/ zł$/, '');
+      a.appendChild(Object.assign(document.createElement('span'), { className: 'cur', textContent: ' zł' }));
+      a.title = `${p.title} – ${fmtPrice(last.effective)}, sprawdzono ${fmtDate(last.t)}`;
+      td.appendChild(a);
+      if (isUnavailable(last.availability)) {
+        td.classList.add('off');
+        td.appendChild(Object.assign(document.createElement('span'), { className: 'sub', textContent: 'niedostępny' }));
+      } else if (last.sale != null && last.price) {
+        const pct = Math.round((1 - last.sale / last.price) * 100);
+        const promo = Object.assign(document.createElement('span'), { className: 'sub promo', title: 'promocja' });
+        promo.append(Object.assign(document.createElement('span'), { className: 'promo-word', textContent: 'promocja ' }), `−${pct}%`);
+        td.appendChild(promo);
+      }
+      if (bestPrice != null && last.effective === bestPrice && !isUnavailable(last.availability)) td.classList.add('cheap');
+      tr.appendChild(td);
+    }
+    return tr;
+  }));
+}
+
 // ---------------- Widok: porownanie sklepow ----------------
 
 let shopsChart;
@@ -479,6 +597,19 @@ const SHOP_DASHES = [[], [8, 5], [2, 4]];
 function shopStyle(shop) {
   const i = shopIndex(shop);
   return { color: css('--s' + (i % 8 + 1)), dash: SHOP_DASHES[i % SHOP_DASHES.length] };
+}
+
+// Najtaniej teraz - wsrod dostepnych ofert, a gdy zadna nie jest dostepna - wsrod wszystkich.
+function compareOffers(offers, field) {
+  const latest = offers.map(p => ({ p, last: p.rows[p.rows.length - 1] }));
+  const priced = latest.filter(o => o.last[field] != null);
+  const available = priced.filter(o => !isUnavailable(o.last.availability));
+  const pool = available.length ? available : priced;
+  const cheapest = pool.reduce((best, o) => !best || o.last[field] < best.last[field] ? o : best, null);
+  const priciest = pool.reduce((worst, o) => !worst || o.last[field] > worst.last[field] ? o : worst, null);
+  // wyrozniamy tylko, gdy jest z czym porownac i ceny sie roznia
+  const bestPrice = pool.length > 1 && priciest.last[field] > cheapest.last[field] ? cheapest.last[field] : null;
+  return { latest, pool, cheapest, priciest, bestPrice };
 }
 
 function renderShops(offers, mode) {
@@ -508,13 +639,7 @@ function renderShops(offers, mode) {
     options,
   });
 
-  // najtaniej teraz - wsrod dostepnych ofert, a gdy zadna nie jest dostepna - wsrod wszystkich
-  const latest = offers.map(p => ({ p, last: p.rows[p.rows.length - 1] }));
-  const priced = latest.filter(o => o.last[field] != null);
-  const available = priced.filter(o => !isUnavailable(o.last.availability));
-  const pool = available.length ? available : priced;
-  const cheapest = pool.reduce((best, o) => !best || o.last[field] < best.last[field] ? o : best, null);
-  const priciest = pool.reduce((worst, o) => !worst || o.last[field] > worst.last[field] ? o : worst, null);
+  const { latest, pool, cheapest, priciest, bestPrice } = compareOffers(offers, field);
 
   const summary = document.getElementById('groupSummary');
   summary.replaceChildren();
@@ -541,7 +666,7 @@ function renderShops(offers, mode) {
     const values = p.rows.map(r => r[field]).filter(v => v != null);
     const { color, dash } = styleOf(p);
     const tr = document.createElement('tr');
-    const isCheapest = cheapest && pool.length > 1 && last[field] === cheapest.last[field];
+    const isCheapest = bestPrice != null && last[field] === bestPrice && !isUnavailable(last.availability);
     tr.classList.toggle('cheapest', isCheapest);
 
     const tdName = document.createElement('td');
@@ -598,6 +723,7 @@ function renderProduct(p) {
   const link = document.getElementById('productLink');
   link.hidden = !p.url;
   if (p.url) link.href = p.url;
+  link.title = p.title;
 
   const regular = css('--s1'), promo = css('--s2');
   const options = baseOptions('zł');
@@ -656,7 +782,7 @@ function renderCompare(products, shop, mode) {
   const datasets = list.map((p, i) => {
     const { color, dash } = seriesStyle(i);
     return {
-      label: shorten(p.title, 60),
+      label: shorten(p.group, 60),
       key: p.key,
       data: p.rows.map(r => ({ x: r.t, y: r[field] })),
       borderColor: color, backgroundColor: color, borderDash: dash,
@@ -688,7 +814,7 @@ function renderCompare(products, shop, mode) {
     const cb = document.createElement('input');
     cb.type = 'checkbox';
     cb.checked = !hiddenKeys.has(p.key);
-    cb.setAttribute('aria-label', 'Pokaż na wykresie: ' + p.title);
+    cb.setAttribute('aria-label', 'Pokaż na wykresie: ' + p.group);
     cb.addEventListener('change', () => setVisible(p.key, cb.checked, tr));
 
     const svg = swatch(color, dash);
@@ -698,8 +824,8 @@ function renderCompare(products, shop, mode) {
     if (p.url) {
       const a = document.createElement('a');
       a.href = p.url; a.target = '_blank'; a.rel = 'noopener';
-      a.textContent = p.title;
-      a.title = p.url;
+      a.textContent = shorten(p.group, 80);
+      a.title = p.title; // pelna nazwa ze sklepu po najechaniu
       const ext = document.createElement('span');
       ext.className = 'ext';
       ext.textContent = ' ↗';
@@ -708,7 +834,7 @@ function renderCompare(products, shop, mode) {
       a.addEventListener('click', e => e.stopPropagation());
       name.appendChild(a);
     } else {
-      name.textContent = p.title;
+      name.textContent = shorten(p.group, 80);
     }
     label.append(cb, svg, name);
     tdName.appendChild(label);
@@ -790,7 +916,7 @@ function setAllVisible(visible) {
   const groupSelect = document.getElementById('groupSelect');
   for (const [name, offers] of groups) {
     const n = offers.length;
-    groupSelect.add(new Option(`${name} (${n} ${n === 1 ? 'sklep' : n < 5 ? 'sklepy' : 'sklepów'})`, name));
+    groupSelect.add(new Option(`${shorten(name, 70)} (${n} ${n === 1 ? 'sklep' : n < 5 ? 'sklepy' : 'sklepów'})`, name));
   }
   const groupPriceMode = document.getElementById('groupPriceMode');
 
@@ -803,7 +929,8 @@ function setAllVisible(visible) {
       if (p.shop !== shop) continue;
       const opt = document.createElement('option');
       opt.value = p.key;
-      opt.textContent = p.title;
+      opt.textContent = shorten(p.group, 70);
+      opt.title = p.title;
       group.appendChild(opt);
     }
     productSelect.appendChild(group);
@@ -829,8 +956,12 @@ function setAllVisible(visible) {
 
   // zakladki; wykres rysujemy dopiero na widocznej zakladce, zeby mial wymiary
   // adres strony#porownanie otwiera od razu zakladke porownania
-  const tabs = { shops: showShops, product: showProduct, compare: showCompare };
-  const HASH = { shops: '#sklepy', product: '#produkt', compare: '#porownanie' };
+  const showList = () => renderList(groups, shops, name => {
+    groupSelect.value = name;
+    selectTab(current = 'shops');
+  });
+  const tabs = { list: showList, shops: showShops, product: showProduct, compare: showCompare };
+  const HASH = { list: '#lista', shops: '#sklepy', product: '#produkt', compare: '#porownanie' };
   function selectTab(name) {
     for (const t of Object.keys(tabs)) {
       document.getElementById('tab-' + t).setAttribute('aria-selected', String(t === name));
@@ -839,7 +970,7 @@ function setAllVisible(visible) {
     tabs[name]();
     history.replaceState(null, '', HASH[name]);
   }
-  let current = Object.keys(HASH).find(t => HASH[t] === location.hash) || 'shops';
+  let current = Object.keys(HASH).find(t => HASH[t] === location.hash) || 'list';
   for (const t of Object.keys(tabs)) {
     document.getElementById('tab-' + t).addEventListener('click', () => selectTab(current = t));
   }

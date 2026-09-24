@@ -59,8 +59,12 @@ GitHub Pages.
    a profil przeglądarki z cookies w `~/.local/state/price-scraper/browser-profile/` —
    usuń oba, żeby zacząć od zera.
    Strona na GitHub Pages odczytuje `data/prices.csv` i `products.csv` na żywo
-   i ma trzy widoki:
-   - **Porównanie sklepów** (`#sklepy`, domyślny) — jeden produkt, linia ceny
+   i ma cztery widoki:
+   - **Lista produktów** (`#lista`, domyślny) — tabela: wiersz = produkt,
+     kolumna = sklep, w komórce aktualna cena z linkiem do sklepu; najtańsza
+     oferta wyróżniona, promocje i niedostępność oznaczone. Kliknięcie nazwy
+     otwiera porównanie sklepów dla tego produktu,
+   - **Porównanie sklepów** (`#sklepy`) — jeden produkt, linia ceny
      w każdym sklepie, tabela z ceną teraz / regularną / najniższą,
      dostępnością i oznaczeniem, gdzie jest najtaniej,
    - **Produkt w sklepie** (`#produkt`) — historia ceny regularnej i promocyjnej
