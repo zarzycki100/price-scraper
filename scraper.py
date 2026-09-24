@@ -6,7 +6,7 @@ Odczytuje liste URL-i produktow z products.txt, dla kazdego pobiera strone,
 wybiera parser na podstawie domeny (SHOPS) i wyciaga cene regularna, promocyjna
 i dostepnosc, a nastepnie dopisuje wiersz z wynikiem do data/prices.csv.
 
-Uruchamiane co 30 min z lokalnego crona (scripts/cron_scrape.sh).
+Uruchamiane co godzine z lokalnego crona (scripts/cron_scrape.sh).
 """
 
 import csv
