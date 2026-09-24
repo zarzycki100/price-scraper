@@ -27,7 +27,10 @@ jobs:
           cache: pip
 
       - name: Install dependencies
-        run: pip install -r requirements.txt
+        run: |
+          pip install -r requirements.txt
+          # Google Chrome jest na runnerach ubuntu-latest; scraper potrzebuje jeszcze Xvfb
+          sudo apt-get install -y xvfb
 
       - name: Run scraper
         run: python scraper.py

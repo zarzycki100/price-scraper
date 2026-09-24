@@ -14,23 +14,26 @@ import json
 import os
 import random
 import re
+import shutil
+import subprocess
 import sys
 import time
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import urlparse
 
 from bs4 import BeautifulSoup
-from curl_cffi import requests
+from playwright.sync_api import Page, sync_playwright
 
 PRODUCTS_FILE = Path("products.txt")
 OUTPUT_CSV = Path("data/prices.csv")
 
-# Stan miedzy przebiegami (profil przegladarki, cookies, przerwy po blokadach).
+# Stan miedzy przebiegami (przerwy po blokadach) i profil przegladarki z cookies.
 # Poza repo, bo cron robi na swoim klonie `git reset --hard`.
-STATE_FILE = Path(
-    os.environ.get("SCRAPER_STATE_DIR") or Path.home() / ".local/state/price-scraper"
-) / "state.json"
+STATE_DIR = Path(os.environ.get("SCRAPER_STATE_DIR") or Path.home() / ".local/state/price-scraper")
+STATE_FILE = STATE_DIR / "state.json"
+BROWSER_PROFILE_DIR = STATE_DIR / "browser-profile"
 
 FIELDNAMES = [
     "timestamp",
@@ -43,19 +46,16 @@ FIELDNAMES = [
     "url",
 ]
 
-# Media Expert stoi za Cloudflare, ktory odrzuca (403, "cf-mitigated: challenge")
-# zwykle requests/urllib po odcisku TLS/HTTP2. curl_cffi podszywa sie pod
-# prawdziwa przegladarke (TLS, HTTP/2, naglowki), wiec przechodzi bez challenge.
-#
-# Profil losujemy raz na przebieg (a nie na request): prawdziwy uzytkownik nie
-# zmienia przegladarki miedzy kliknieciami, a rozne odciski TLS z jednego IP
-# w ciagu minuty wygladaja podejrzanie. Tylko wspolczesne profile desktopowe.
-IMPERSONATE_PROFILES = [
-    "chrome136", "chrome142", "chrome145", "chrome146",
-    "edge101",
-    "safari184", "safari260",
-    "firefox144", "firefox147",
-]
+# Sklepy stoja za bot-managerami (Media Expert - Cloudflare, Euro - Akamai),
+# ktore oceniaja nie tylko odcisk TLS/HTTP2, ale tez wykonuja w przegladarce
+# JavaScript zbierajacy dane o srodowisku i zachowaniu. Dlatego strony pobiera
+# prawdziwy Google Chrome (Playwright) z trwalym profilem na dysku - i to
+# w trybie z oknem, na wirtualnym ekranie Xvfb: headless Chromium Akamai
+# rozpoznawal i blokowal (403), choc zwykla przegladarka z tego IP przechodzila.
+BROWSER_CHANNEL = "chrome"
+BROWSER_ARGS = ["--disable-blink-features=AutomationControlled", "--window-position=0,0"]
+VIEWPORTS = [(1920, 1080), (1536, 864), (1440, 900), (1366, 768), (1600, 900)]
+PAGE_TIMEOUT_MS = 45_000
 
 # Losowa przerwa (w sekundach) miedzy kolejnymi produktami - rowne odstepy
 # co do milisekundy to typowy slad bota. Czasem robimy dluzsza pauze,
@@ -64,14 +64,17 @@ DELAY_RANGE = (4, 12)
 LONG_PAUSE_CHANCE = 0.15
 LONG_PAUSE_RANGE = (15, 40)
 
-# Odpowiedzi oznaczajace blokade / limit - ponawiamy z rosnaca przerwa.
-RETRY_STATUSES = {403, 429, 503}
+# Odpowiedzi oznaczajace blokade / limit. Ponawiamy (z rosnaca przerwa) tylko
+# przeciazenie i limit - 403 od bot-managera to decyzja, a nie chwilowy blad,
+# i ponawianie tylko pogarsza ocene IP.
+BLOCK_STATUSES = {403, 429, 503}
+RETRY_STATUSES = {429, 503}
 RETRY_DELAYS = [(20, 40), (60, 90)]
 # Po tylu kolejnych blokadach z jednego sklepu odpuszczamy go w tym przebiegu,
 # zeby nie dobijac sie dalej i nie utrwalac blokady.
 MAX_SHOP_FAILURES = 2
 
-# Jak dlugo trzymamy ten sam profil przegladarki i cookies. Powracajacy
+# Jak dlugo trzymamy ten sam profil przegladarki (cookies, localStorage). Powracajacy
 # "uzytkownik" z tymi samymi cookies wyglada naturalniej niz nowa, pusta
 # przegladarka przy kazdym przebiegu - ale co kilka dni zmieniamy tozsamosc.
 IDENTITY_TTL_RANGE = (1 * 86400, 3 * 86400)
@@ -81,15 +84,13 @@ IDENTITY_TTL_RANGE = (1 * 86400, 3 * 86400)
 COOLDOWN_BASE = 3600
 COOLDOWN_MAX = 12 * 3600
 
-# Strony "sprawdzania przegladarki" (np. Cloudflare) potrafia przyjsc z kodem 200.
-CHALLENGE_MARKERS = ("<title>Just a moment", "Attention Required! | Cloudflare", "cf-chl")
-
-ACCEPT_LANGUAGES = [
-    "pl-PL,pl;q=0.9,en-US;q=0.8,en;q=0.7",
-    "pl-PL,pl;q=0.9,en;q=0.8",
-    "pl,en-US;q=0.9,en;q=0.8",
-    "pl-PL,pl;q=0.8,en-US;q=0.5,en;q=0.3",
-]
+# Strony "sprawdzania przegladarki" / blokady potrafia przyjsc z kodem 200.
+CHALLENGE_MARKERS = (
+    "<title>Just a moment",
+    "Attention Required! | Cloudflare",
+    "cf-chl",
+    "RTV EURO AGD - Blokada",
+)
 
 # Nazwy meta-tagow <meta property="..." content="..."> uzywanych przez Media Expert.
 META_KEYS = {
@@ -223,46 +224,66 @@ def save_state(state: dict) -> None:
 
 
 def forget_identity(state: dict) -> None:
-    """Po blokadzie porzucamy profil i cookies - mogly zostac oznaczone jako bot."""
+    """Po blokadzie porzucamy profil przegladarki - mogl zostac oznaczony jako bot."""
     state.pop("identity", None)
-    state.pop("cookies", None)
 
 
-def new_session(state: dict) -> requests.Session:
-    """Sesja udajaca jedna przegladarke - ta sama przez kilka dni, z zapisanymi cookies.
+@contextmanager
+def virtual_display(width: int, height: int):
+    """Wirtualny ekran Xvfb - przegladarka dziala "z oknem", ale nic nie pokazuje sie na pulpicie."""
+    proc = subprocess.Popen(
+        ["Xvfb", "-displayfd", "1", "-screen", "0", f"{width}x{height}x24", "-nolisten", "tcp"],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.DEVNULL,
+    )
+    display = proc.stdout.readline().decode().strip()
+    if not display:
+        proc.kill()
+        raise RuntimeError("Xvfb nie wystartowal (sudo apt install xvfb)")
+    try:
+        yield f":{display}"
+    finally:
+        proc.terminate()
+        proc.wait(timeout=10)
 
-    Sesja trzyma cookies miedzy requestami (np. te ustawiane przez Cloudflare),
-    tak jak robi to prawdziwa przegladarka.
+
+@contextmanager
+def open_browser(state: dict):
+    """Chromium z profilem na dysku - ten sam przez kilka dni (cookies, localStorage).
+
+    Powracajacy uzytkownik z historia wyglada naturalniej niz nowa, pusta
+    przegladarka przy kazdym przebiegu. Po wygasnieciu lub blokadzie profil
+    jest kasowany i zaczynamy od zera.
     """
     now = time.time()
     identity = state.get("identity")
-    if not identity or identity.get("expires", 0) < now or identity.get("profile") not in IMPERSONATE_PROFILES:
-        forget_identity(state)
+    if not identity or identity.get("expires", 0) < now or "viewport" not in identity:
+        shutil.rmtree(BROWSER_PROFILE_DIR, ignore_errors=True)
         identity = state["identity"] = {
-            "profile": random.choice(IMPERSONATE_PROFILES),
-            "accept_language": random.choice(ACCEPT_LANGUAGES),
+            "viewport": random.choice(VIEWPORTS),
             "expires": now + random.uniform(*IDENTITY_TTL_RANGE),
         }
-        print(f"Nowy profil przegladarki: {identity['profile']}")
-    else:
-        print(f"Profil przegladarki: {identity['profile']}")
+        print("Nowy profil przegladarki")
 
-    session = requests.Session(
-        impersonate=identity["profile"],
-        headers={"Accept-Language": identity["accept_language"]},
-        timeout=20,
-    )
-    for c in state.get("cookies", []):
-        if c.get("expires") is None or c["expires"] > now:
-            session.cookies.set(c["name"], c["value"], domain=c["domain"], path=c["path"])
-    return session
-
-
-def dump_cookies(session: requests.Session) -> list[dict]:
-    return [
-        {"name": c.name, "value": c.value, "domain": c.domain, "path": c.path, "expires": c.expires}
-        for c in session.cookies.jar
-    ]
+    width, height = identity["viewport"]
+    with virtual_display(width, height) as display, sync_playwright() as pw:
+        context = pw.chromium.launch_persistent_context(
+            BROWSER_PROFILE_DIR,
+            channel=BROWSER_CHANNEL,
+            headless=False,
+            env={**os.environ, "DISPLAY": display},
+            args=[*BROWSER_ARGS, f"--window-size={width},{height}"],
+            # bez --enable-automation: pasek "Chrome jest kontrolowany..." i navigator.webdriver
+            ignore_default_args=["--enable-automation"],
+            no_viewport=True,  # okno na caly ekran, jak u zwyklego uzytkownika
+            locale="pl-PL",
+            timezone_id="Europe/Warsaw",
+        )
+        context.set_default_timeout(PAGE_TIMEOUT_MS)
+        try:
+            yield context.pages[0] if context.pages else context.new_page()
+        finally:
+            context.close()
 
 
 def human_pause() -> None:
@@ -272,58 +293,80 @@ def human_pause() -> None:
         time.sleep(random.uniform(*DELAY_RANGE))
 
 
-def is_blocked(resp: requests.Response) -> bool:
-    if resp.status_code in RETRY_STATUSES or resp.headers.get("cf-mitigated"):
+def browse_a_bit(page: Page) -> None:
+    """Kilka ruchow myszy i przewiniec - skrypty bot-managerow zbieraja takie zdarzenia."""
+    width, height = page.evaluate("[innerWidth, innerHeight]")
+    for _ in range(random.randint(2, 5)):
+        page.mouse.move(random.randint(50, width - 50), random.randint(50, height - 50),
+                        steps=random.randint(5, 25))
+        page.mouse.wheel(0, random.randint(150, 700))
+        page.wait_for_timeout(random.randint(400, 1500))
+
+
+def is_blocked(status: int, headers: dict, body: str) -> bool:
+    if status in BLOCK_STATUSES or headers.get("cf-mitigated"):
         return True
-    return any(marker in resp.text for marker in CHALLENGE_MARKERS)
+    return any(marker in body for marker in CHALLENGE_MARKERS)
 
 
-def get_with_retry(session: requests.Session, url: str) -> requests.Response:
-    """GET z ponawianiem po blokadzie (z uwzglednieniem Retry-After)."""
+def load_page(page: Page, url: str) -> str:
+    """Otwiera strone i zwraca HTML z serwera (przed przerobkami JS), z ponawianiem po blokadzie.
+
+    Bierzemy tresc odpowiedzi, a nie page.content(): po hydratacji aplikacja
+    moze usunac z DOM osadzony stan strony, z ktorego parsery czytaja ceny.
+    """
     for attempt in range(len(RETRY_DELAYS) + 1):
-        resp = session.get(url)
-        if not is_blocked(resp):
-            resp.raise_for_status()
-            return resp
-        if attempt == len(RETRY_DELAYS):
+        resp = page.goto(url, wait_until="domcontentloaded")
+        if resp is None:
+            raise RuntimeError("brak odpowiedzi serwera")
+        status, headers, body = resp.status, resp.headers, resp.text()
+        if not is_blocked(status, headers, body):
+            if status >= 400:
+                raise RuntimeError(f"HTTP {status}")
+            browse_a_bit(page)
+            return body
+        if status not in RETRY_STATUSES or attempt == len(RETRY_DELAYS):
             break
-        retry_after = resp.headers.get("Retry-After", "")
+        retry_after = headers.get("retry-after", "")
         wait = int(retry_after) if retry_after.isdigit() else random.uniform(*RETRY_DELAYS[attempt])
         if wait > max(RETRY_DELAYS[-1]):
             break  # kaze czekac dluzej niz przebieg - niech zadziala cooldown
-        print(f"Blokada (HTTP {resp.status_code}) dla {url} - ponawiam za {wait:.0f} s", file=sys.stderr)
+        print(f"Blokada (HTTP {status}) dla {url} - ponawiam za {wait:.0f} s", file=sys.stderr)
         time.sleep(wait)
-    raise Blocked(f"HTTP {resp.status_code}, blokada po {attempt + 1} probach")
+    raise Blocked(f"HTTP {status}, blokada po {attempt + 1} probach")
 
 
-def has_cookies_for(session: requests.Session, host: str) -> bool:
-    domain = host.removeprefix("www.")
-    return any(domain in (c.domain or "") for c in session.cookies.jar)
+def home_url(url: str) -> str:
+    parts = urlparse(url)
+    return f"{parts.scheme}://{parts.netloc}/"
 
 
-def warm_up(session: requests.Session, host: str) -> None:
+def has_cookies_for(page: Page, url: str) -> bool:
+    return bool(page.context.cookies(home_url(url)))
+
+
+def warm_up(page: Page, url: str) -> None:
     """Wejscie na strone glowna sklepu przed produktami.
 
     Przegladarka bez zadnych cookies wchodzaca prosto na strone produktu
-    wyglada dla Akamai (Euro) podejrzanie - po spadku reputacji IP takie
-    wejscia dostaja 403. Strona glowna ustawia cookies bot-managera
-    (ak_bmsc, bm_s ...), z ktorymi strony produktow przechodza.
+    wyglada dla bot-managera podejrzanie. Strona glowna ustawia jego cookies
+    (w Euro: ak_bmsc, bm_s ...), z ktorymi przechodza strony produktow.
     """
-    print(f"Rozgrzewka: strona glowna {host}")
-    get_with_retry(session, f"https://{host}/")
+    print(f"Rozgrzewka: strona glowna {home_url(url)}")
+    load_page(page, home_url(url))
     human_pause()
 
 
-def fetch_product(session: requests.Session, url: str) -> dict:
+def fetch_product(page: Page, url: str) -> dict:
     """Pobiera strone produktu i wyciaga dane cenowe parserem wlasciwym dla sklepu."""
     host = urlparse(url).hostname
     if host not in SHOPS:
         raise ValueError(f"nieobslugiwany sklep: {host}")
     shop, parser = SHOPS[host]
 
-    resp = get_with_retry(session, url)
-    soup = BeautifulSoup(resp.text, "html.parser")
-    return {"url": url, "shop": shop, **parser(soup, resp.text)}
+    html = load_page(page, url)
+    soup = BeautifulSoup(html, "html.parser")
+    return {"url": url, "shop": shop, **parser(soup, html)}
 
 
 def shop_for_url(url: str) -> str:
@@ -367,57 +410,61 @@ def main() -> None:
     timestamp = datetime.now(timezone.utc).isoformat(timespec="seconds")
     state = load_state()
     cooldowns: dict[str, dict] = state.setdefault("cooldowns", {})
-    session = new_session(state)
+
+    to_fetch = []
+    for url in urls:
+        host = urlparse(url).hostname
+        until = cooldowns.get(host, {}).get("until", 0)
+        if until > time.time():
+            left = (until - time.time()) / 60
+            print(f"POMIJAM {url}: {host} odpoczywa po blokadzie jeszcze {left:.0f} min", file=sys.stderr)
+        else:
+            to_fetch.append(url)
+    if not to_fetch:
+        print("Wszystkie sklepy odpoczywaja po blokadzie - nic nie pobieram.")
+        return
 
     rows = []
     attempted = 0
     blocked: dict[str, int] = {}  # host -> liczba kolejnych blokad w tym przebiegu
     warmed: set[str] = set()
-    for url in urls:
-        host = urlparse(url).hostname
-        cooldown = cooldowns.get(host, {})
-        if cooldown.get("until", 0) > time.time():
-            left = (cooldown["until"] - time.time()) / 60
-            print(f"POMIJAM {url}: {host} odpoczywa po blokadzie jeszcze {left:.0f} min", file=sys.stderr)
-            continue
-        if blocked.get(host, 0) >= MAX_SHOP_FAILURES:
-            print(f"POMIJAM {url}: {host} blokuje w tym przebiegu", file=sys.stderr)
-            continue
-        if attempted > 0:
-            human_pause()
-        attempted += 1
-        try:
-            if host not in warmed and not has_cookies_for(session, host):
-                warmed.add(host)
-                warm_up(session, host)
-            data = fetch_product(session, url)
-            blocked[host] = 0
-            cooldowns.pop(host, None)
-            data["timestamp"] = timestamp
-            rows.append(data)
-            print(f"OK  [{data['shop']}] {data['title']!r} -> cena: {data['price']}, promo: {data['sale_price']}")
-        except Blocked as exc:
-            blocked[host] = blocked.get(host, 0) + 1
-            if blocked[host] >= MAX_SHOP_FAILURES:
-                streak = cooldown.get("streak", 0) + 1
-                pause = min(COOLDOWN_BASE * 2 ** (streak - 1), COOLDOWN_MAX) * random.uniform(0.8, 1.2)
-                cooldowns[host] = {"until": time.time() + pause, "streak": streak}
-                print(f"{host} blokuje - przerwa {pause / 3600:.1f} h, zmiana profilu przegladarki", file=sys.stderr)
-            print(f"BLAD dla {url}: {exc}", file=sys.stderr)
-        except Exception as exc:  # noqa: BLE001 - chcemy zebrac reszte produktow nawet po bledzie
-            print(f"BLAD dla {url}: {exc}", file=sys.stderr)
+    with open_browser(state) as page:
+        for url in to_fetch:
+            host = urlparse(url).hostname
+            if blocked.get(host, 0) >= MAX_SHOP_FAILURES:
+                print(f"POMIJAM {url}: {host} blokuje w tym przebiegu", file=sys.stderr)
+                continue
+            if attempted > 0:
+                human_pause()
+            attempted += 1
+            try:
+                if host not in warmed and not has_cookies_for(page, url):
+                    warmed.add(host)
+                    warm_up(page, url)
+                data = fetch_product(page, url)
+                blocked[host] = 0
+                cooldowns.pop(host, None)
+                data["timestamp"] = timestamp
+                rows.append(data)
+                print(f"OK  [{data['shop']}] {data['title']!r} -> cena: {data['price']}, promo: {data['sale_price']}")
+            except Blocked as exc:
+                blocked[host] = blocked.get(host, 0) + 1
+                if blocked[host] >= MAX_SHOP_FAILURES:
+                    streak = cooldowns.get(host, {}).get("streak", 0) + 1
+                    pause = min(COOLDOWN_BASE * 2 ** (streak - 1), COOLDOWN_MAX) * random.uniform(0.8, 1.2)
+                    cooldowns[host] = {"until": time.time() + pause, "streak": streak}
+                    print(f"{host} blokuje - przerwa {pause / 3600:.1f} h, zmiana profilu przegladarki", file=sys.stderr)
+                print(f"BLAD dla {url}: {exc}", file=sys.stderr)
+            except Exception as exc:  # noqa: BLE001 - chcemy zebrac reszte produktow nawet po bledzie
+                print(f"BLAD dla {url}: {exc}", file=sys.stderr)
 
     if any(n >= MAX_SHOP_FAILURES for n in blocked.values()):
         forget_identity(state)
-    else:
-        state["cookies"] = dump_cookies(session)
     save_state(state)
 
     if rows:
         append_rows(rows)
         print(f"Zapisano {len(rows)} wierszy do {OUTPUT_CSV}")
-    elif attempted == 0:
-        print("Wszystkie sklepy odpoczywaja po blokadzie - nic nie pobieram.")
     else:
         sys.exit("Nie udalo sie pobrac zadnego produktu.")
 

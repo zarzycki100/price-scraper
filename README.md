@@ -31,7 +31,9 @@ GitHub Pages.
    więc cykliczne pobieranie działa z Twojego komputera):
    ```
    gh auth login        # jednorazowo - cron pushuje przez token gh (HTTPS)
-   pip install --user -r requirements.txt
+   pip install --user -r requirements.txt   # Ubuntu 24+: dodaj --break-system-packages
+   sudo apt install xvfb                    # wirtualny ekran dla przegladarki
+   # wymagany tez zainstalowany Google Chrome (/usr/bin/google-chrome)
    crontab -e
    # dopisz:
    */30 * * * * /sciezka/do/repo/scripts/cron_scrape.sh
@@ -40,8 +42,13 @@ GitHub Pages.
    więc nie rusza Twojej kopii roboczej. Dopisuje wiersze do
    `data/prices.csv`, commituje i pushuje je do repo.
    Log: `~/.local/state/price-scraper/cron.log`.
-   Stan scrapera (profil przeglądarki, cookies, przerwy po blokadach):
-   `~/.local/state/price-scraper/state.json` — usuń go, żeby zacząć od zera.
+   Strony pobiera Google Chrome sterowany przez Playwright, w trybie z oknem
+   na wirtualnym ekranie Xvfb (nic nie pojawia się na pulpicie) — sklepy
+   chronią się bot-managerami (Cloudflare, Akamai), które wykonują
+   w przeglądarce JavaScript i rozpoznają tryb headless.
+   Stan scrapera (przerwy po blokadach) jest w `~/.local/state/price-scraper/state.json`,
+   a profil przeglądarki z cookies w `~/.local/state/price-scraper/browser-profile/` —
+   usuń oba, żeby zacząć od zera.
    Strona na GitHub Pages odczytuje `data/prices.csv` na żywo i ma dwa widoki:
    - **Produkt** — historia ceny regularnej i promocyjnej jednego produktu
      (lista pogrupowana po sklepach, z oznaczeniem sklepu i linkiem),
@@ -60,7 +67,7 @@ w `docs/index.html` (używane tylko dla starych wierszy bez kolumny `shop`).
 ## Struktura plików
 
 ```
-scraper.py                     - skrypt scrapujący (curl_cffi + BeautifulSoup)
+scraper.py                     - skrypt scrapujący (Playwright/Chrome + BeautifulSoup)
 products.txt                   - lista URL-i produktów do monitorowania
 requirements.txt               - zależności Pythona
 data/prices.csv                - historia cen (tworzona automatycznie)
@@ -76,11 +83,13 @@ scripts/cron_scrape.sh         - uruchamianie z lokalnego crona (co 30 min)
   wyłączony, a workflow zostaje tylko do ręcznego uruchamiania.
 - Cron działa tylko, gdy komputer jest włączony (i nie uśpiony) — przerwy
   będą widoczne jako luki na wykresie.
-- Media Expert stoi za Cloudflare, który zwykłe `requests` odrzuca kodem 403
-  (`cf-mitigated: challenge`). Dlatego skrypt używa `curl_cffi`, który
-  podszywa się pod przeglądarkę Chrome (odcisk TLS/HTTP2). Jeśli 403 wróci,
-  można spróbować innej wartości `IMPERSONATE` w `scraper.py`
-  (np. `"safari"`, `"firefox"`) albo zaktualizować `curl_cffi`.
+- Media Expert stoi za Cloudflare, a Euro za Akamai Bot Manager. Oba oceniają
+  nie tylko odcisk TLS/HTTP2, ale też wykonują w przeglądarce JavaScript,
+  dlatego scraper używa prawdziwego Google Chrome (Playwright + Xvfb) zamiast
+  zwykłych zapytań HTTP ani headless Chromium, które Akamai rozpoznaje. Zbyt częste odpytywanie i tak kończy się blokadą **adresu IP**
+  (Euro: strona „RTV EURO AGD - Blokada” z Twoim IP) — wtedy nie pomaga
+  żadna zmiana w kodzie, trzeba przeczekać. Scraper sam robi wtedy przerwy
+  dla sklepu (1 h, 2 h, 4 h … do 12 h).
 - Kolumna `shop` w CSV została dodana później — przy pierwszym uruchomieniu
   scraper sam przepisze istniejący `data/prices.csv` do nowego układu kolumn,
   uzupełniając sklep na podstawie URL-a.
