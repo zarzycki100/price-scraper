@@ -59,11 +59,24 @@ GitHub Pages.
    a profil przeglądarki z cookies w `~/.local/state/price-scraper/browser-profile/` —
    usuń oba, żeby zacząć od zera.
    Strona na GitHub Pages odczytuje `data/prices.csv` i `products.csv` na żywo
-   i ma cztery widoki:
+   i ma pięć widoków:
    - **Lista produktów** (`#lista`, domyślny) — tabela: wiersz = produkt,
      kolumna = sklep, w komórce aktualna cena z linkiem do sklepu; najtańsza
      oferta wyróżniona, promocje i niedostępność oznaczone. Kliknięcie nazwy
      otwiera porównanie sklepów dla tego produktu,
+   - **Zmiany cen** (`#zmiany-<podzakładka>`) — analiza taktyki cenowej sklepów:
+     - *Dziennik zmian* — każda zmiana ceny (kiedy, gdzie, z ilu na ile, ±%),
+       czy dała sklepowi pozycję najtańszego albo ją odebrała, start/koniec promocji,
+     - *Kto reaguje na kogo* — macierz sklep × sklep: jak często po zmianie ceny
+       w jednym sklepie inny zmienia cenę tego samego produktu w wybranym oknie
+       czasu, z medianą opóźnienia i typem reakcji (dopasowanie, podcięcie…),
+     - *Kiedy zmieniają* — heatmapa dzień tygodnia × godzina dla każdego sklepu,
+     - *Pozycja cenowa* — o ile % sklep jest średnio droższy od najtańszej oferty
+       (wykres w czasie i tabela produktów, z udziałem czasu bycia najtańszym),
+     - *Promocje* — czas trwania, rabat, porównanie z najniższą ceną z 30 dni przed
+       promocją (Omnibus) i wykrywanie podniesienia ceny regularnej przed promocją,
+     - *Zmienność* — ranking ofert: liczba zmian na dobę, średnia i maksymalna
+       zmiana, rozpiętość cen i mały wykres przebiegu,
    - **Porównanie sklepów** (`#sklepy`) — jeden produkt, linia ceny
      w każdym sklepie, tabela z ceną teraz / regularną / najniższą,
      dostępnością i oznaczeniem, gdzie jest najtaniej,

@@ -157,6 +157,7 @@
   table.matrix td { padding: .5rem .6rem; border-top: 1px solid var(--border); vertical-align: top; }
   table.matrix tr:hover td { background: var(--chip-bg); }
   table.matrix td.product { min-width: 12rem; overflow-wrap: anywhere; }
+  table.legend .product-btn { overflow-wrap: break-word; }
   table.matrix td.product .linkbtn { color: var(--text); text-align: left; font-weight: 500; }
   table.matrix td.product .linkbtn:hover { color: var(--accent); text-decoration: underline; }
   table.matrix td.price { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
@@ -177,6 +178,46 @@
   }
   @media (min-width: 601px) { table.matrix .cur-head { display: none; } }
 
+  /* Zmiany cen: podzakladki */
+  .subtabs { display: flex; flex-wrap: wrap; gap: .4rem; margin-bottom: 1rem; }
+  .subtab {
+    font: inherit; font-size: .85rem; cursor: pointer;
+    border: 1px solid var(--border); background: var(--surface); color: var(--text-2);
+    border-radius: 999px; padding: .3rem .8rem;
+  }
+  .subtab[aria-selected="true"] { background: var(--text); color: var(--bg); border-color: var(--text); }
+  .card h3 { font-size: 1rem; margin: 1.25rem 0 .5rem; }
+  .intro { color: var(--text-2); font-size: .9rem; margin: 0 0 1rem; max-width: 70ch; }
+  .down { color: var(--s3); }
+  .up { color: var(--s8); }
+  .flag { color: var(--s8); font-weight: 600; }
+  table.legend td.nowrap, table.legend th.nowrap { white-space: nowrap; }
+  table.legend .product-btn { color: var(--text); text-align: left; }
+  table.legend .product-btn:hover { color: var(--accent); text-decoration: underline; }
+  table.legend th.row-head { text-transform: none; letter-spacing: 0; font-size: .85rem; color: var(--text); }
+  td.cell-rate { text-align: center; }
+  .spark { display: block; }
+  .sub .shop-cell { gap: .35rem; margin-top: .15rem; }
+  .sub .swatch { width: 18px; height: 8px; }
+
+  /* heatmapa: dzien tygodnia x godzina */
+  .heat-wrap { display: grid; grid-template-columns: repeat(auto-fit, minmax(290px, 1fr)); gap: 1.25rem; }
+  .heat-title { font-weight: 600; font-size: .9rem; margin-bottom: .4rem; }
+  .heat-title span { color: var(--text-3); font-weight: 400; }
+  .heat { display: grid; grid-template-columns: 1.8rem repeat(24, minmax(0, 1fr)); gap: 2px; font-size: .62rem; color: var(--text-3); }
+  .heat .c { aspect-ratio: 1; border-radius: 2px; background: var(--grid); }
+  .heat .c.none { background: transparent; outline: 1px dashed var(--border); outline-offset: -1px; }
+  .heat .hl { text-align: center; }
+  @media (max-width: 600px) {
+    table.legend { font-size: .8rem; }
+    table.legend th { white-space: normal; text-transform: none; letter-spacing: 0; font-size: .7rem; padding: .25rem .35rem; }
+    table.legend td { padding: .4rem .35rem; }
+    table.legend td.nowrap, table.legend .num { white-space: normal; }
+  }
+  .heat-scale { display: flex; align-items: center; gap: .5rem; font-size: .75rem; color: var(--text-3); margin-top: .75rem; }
+  .heat-scale .bar { width: 120px; height: 8px; border-radius: 4px;
+    background: linear-gradient(to right, color-mix(in srgb, var(--s1) 15%, transparent), var(--s1)); }
+
   .empty { color: var(--text-2); padding: 2rem 0; text-align: center; }
   [hidden] { display: none !important; }
 </style>
@@ -188,6 +229,7 @@
 
 <div class="tabs" role="tablist">
   <button class="tab" role="tab" id="tab-list" aria-selected="true" aria-controls="view-list">Lista produktów</button>
+  <button class="tab" role="tab" id="tab-changes" aria-selected="false" aria-controls="view-changes">Zmiany cen</button>
   <button class="tab" role="tab" id="tab-shops" aria-selected="false" aria-controls="view-shops">Porównanie sklepów</button>
   <button class="tab" role="tab" id="tab-product" aria-selected="false" aria-controls="view-product">Produkt w sklepie</button>
   <button class="tab" role="tab" id="tab-compare" aria-selected="false" aria-controls="view-compare">Produkty w sklepie</button>
@@ -203,6 +245,147 @@
     </div>
     <p class="hint">Aktualne ceny (z promocją). Wyróżniona – najtańsza oferta wśród dostępnych.
       Cena otwiera stronę produktu w sklepie, nazwa – wykres cen we wszystkich sklepach.</p>
+  </div>
+</section>
+
+<section id="view-changes" role="tabpanel" aria-labelledby="tab-changes" hidden>
+  <div class="subtabs" role="tablist" aria-label="Analizy zmian cen">
+    <button class="subtab" role="tab" data-sub="dziennik">Dziennik zmian</button>
+    <button class="subtab" role="tab" data-sub="reakcje">Kto reaguje na kogo</button>
+    <button class="subtab" role="tab" data-sub="harmonogram">Kiedy zmieniają</button>
+    <button class="subtab" role="tab" data-sub="pozycja">Pozycja cenowa</button>
+    <button class="subtab" role="tab" data-sub="promocje">Promocje</button>
+    <button class="subtab" role="tab" data-sub="zmiennosc">Zmienność</button>
+  </div>
+
+  <div class="card" id="sub-dziennik">
+    <div class="controls">
+      <label>Sklep: <select id="logShop"></select></label>
+      <label class="product-select">Produkt: <select id="logGroup"></select></label>
+      <label>Kierunek:
+        <select id="logDir">
+          <option value="all">wszystkie</option>
+          <option value="down">obniżki</option>
+          <option value="up">podwyżki</option>
+        </select>
+      </label>
+    </div>
+    <div class="stats" id="logStats"></div>
+    <div class="table-scroll">
+      <table class="legend">
+        <thead><tr>
+          <th>Kiedy</th><th>Produkt / sklep</th>
+          <th class="num">Nowa cena</th><th class="num">Zmiana</th><th class="opt">Uwagi</th>
+        </tr></thead>
+        <tbody id="logBody"></tbody>
+      </table>
+    </div>
+    <p class="hint">Zmiana = inna cena aktualna (z promocją) niż w poprzednim pomiarze. Czas to moment wykrycia –
+      pomiar jest co godzinę, więc zmiana nastąpiła w ciągu godziny przed nim (dłużej, jeśli sklep miał przerwę po blokadzie).</p>
+  </div>
+
+  <div class="card" id="sub-reakcje" hidden>
+    <p class="intro">Po każdej zmianie ceny w jednym sklepie sprawdzamy, czy inny sklep zmienił cenę tego samego
+      produktu w ciągu wybranego czasu (i zanim pierwszy sklep zmienił ją znowu).</p>
+    <div class="controls">
+      <label>Okno reakcji:
+        <select id="reactWindow">
+          <option value="2">2 h</option>
+          <option value="6" selected>6 h</option>
+          <option value="12">12 h</option>
+          <option value="24">24 h</option>
+          <option value="72">3 dni</option>
+        </select>
+      </label>
+    </div>
+    <div class="table-scroll"><table class="legend" id="reactMatrix"></table></div>
+    <p class="hint">Wiersz – sklep, który zmienił cenę pierwszy; kolumna – sklep, który zmienił cenę po nim.
+      „3 z 12” = 3 reakcje na 12 zmian, przy których sklep z kolumny miał ten produkt w ofercie.
+      Dopasowanie – cena w granicach 0,5% (min. 1 zł) nowej ceny pierwszego sklepu; podcięcie – obniżka poniżej niej.
+      To korelacja w czasie, nie dowód reakcji.</p>
+    <h3>Przypadki</h3>
+    <div class="table-scroll">
+      <table class="legend">
+        <thead><tr>
+          <th>Produkt</th><th>Pierwszy</th><th>Reakcja</th><th>Po / typ</th>
+        </tr></thead>
+        <tbody id="reactBody"></tbody>
+      </table>
+    </div>
+    <p class="hint" id="reactNote"></p>
+  </div>
+
+  <div class="card" id="sub-harmonogram" hidden>
+    <p class="intro">Liczba zmian cen według dnia tygodnia i godziny (czas lokalny) – pokazuje, czy sklep
+      przelicza ceny w stałych porach.</p>
+    <div class="heat-wrap" id="heatWrap"></div>
+    <div class="heat-scale"><span>mniej</span><span class="bar"></span><span>więcej zmian</span></div>
+    <p class="hint">Pole z przerywaną ramką – brak pomiarów w tej godzinie. Po najechaniu: liczba zmian i pomiarów.
+      Wnioski mają sens dopiero po kilku tygodniach zbierania danych.</p>
+  </div>
+
+  <div class="card" id="sub-pozycja" hidden>
+    <p class="intro">O ile procent sklep jest średnio droższy od najtańszej dostępnej oferty tego samego produktu
+      (0% = najtańszy). Liczone w każdym pomiarze dla produktów, które są w co najmniej dwóch sklepach.</p>
+    <div class="chart-box"><canvas id="positionChart"></canvas></div>
+    <h3>Według produktów</h3>
+    <div class="table-scroll">
+      <table class="legend">
+        <thead><tr id="positionHead"></tr></thead>
+        <tbody id="positionBody"></tbody>
+      </table>
+    </div>
+    <p class="hint">W komórce: średnio o ile drożej niż najtańszy sklep, pod spodem – przez jaką część czasu sklep był najtańszy.</p>
+  </div>
+
+  <div class="card" id="sub-promocje" hidden>
+    <div class="table-scroll">
+      <table class="legend">
+        <thead><tr>
+          <th>Sklep</th><th class="num">Promocje</th><th class="num opt">Trwają</th>
+          <th class="num opt">Mediana czasu</th><th class="num">Śr. rabat</th><th class="num">Podniesiona cena przed</th>
+        </tr></thead>
+        <tbody id="promoSummary"></tbody>
+      </table>
+    </div>
+    <h3>Wszystkie promocje</h3>
+    <div class="table-scroll">
+      <table class="legend">
+        <thead><tr>
+          <th>Produkt / sklep</th><th>Od</th><th class="num">Czas</th>
+          <th class="num">Rabat</th><th class="num opt">Wobec najniższej z 30 dni</th><th class="opt">Cena regularna przed</th>
+        </tr></thead>
+        <tbody id="promoBody"></tbody>
+      </table>
+    </div>
+    <p class="hint">Rabat – względem ceny regularnej podanej przez sklep. „Wobec najniższej z 30 dni” – porównanie ceny
+      promocyjnej z najniższą ceną z 30 dni przed promocją (jak w dyrektywie Omnibus); dodatnia wartość znaczy, że
+      „promocja” jest droższa niż niedawna zwykła cena. „Podniesiona” – cena regularna na starcie promocji wyższa niż
+      najniższa regularna przed nią. Przy krótkiej historii przed promocją wynik jest niepewny.</p>
+  </div>
+
+  <div class="card" id="sub-zmiennosc" hidden>
+    <div class="controls">
+      <label>Sklep: <select id="volShop"></select></label>
+      <label>Sortuj:
+        <select id="volSort">
+          <option value="rate">zmiany na dobę</option>
+          <option value="max">największa zmiana</option>
+          <option value="range">rozpiętość cen</option>
+        </select>
+      </label>
+    </div>
+    <div class="table-scroll">
+      <table class="legend">
+        <thead><tr>
+          <th>Produkt / sklep</th><th class="num">Zmiany</th><th class="num">Na dobę</th>
+          <th class="num opt">Śr. zmiana</th><th class="num">Maks.</th><th class="num opt">Rozpiętość</th><th class="opt">Przebieg</th>
+        </tr></thead>
+        <tbody id="volBody"></tbody>
+      </table>
+    </div>
+    <p class="hint">Na dobę – liczba zmian podzielona przez okres pomiarów (co najmniej 1 dzień). Rozpiętość – różnica
+      między najwyższą a najniższą ceną aktualną w całym okresie.</p>
   </div>
 </section>
 
@@ -453,10 +636,10 @@ function shopIndex(shop) {
 }
 
 const fmtPrice = v => v == null ? '–' :
-  v.toLocaleString('pl-PL', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' zł';
+  v.toLocaleString('pl-PL', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + '\u00a0zł';
 // w liscie bez ",00" - wezsze kolumny na telefonie
 const fmtPriceShort = v => v == null ? '–' :
-  v.toLocaleString('pl-PL', { minimumFractionDigits: Number.isInteger(v) ? 0 : 2, maximumFractionDigits: 2 }) + ' zł';
+  v.toLocaleString('pl-PL', { minimumFractionDigits: Number.isInteger(v) ? 0 : 2, maximumFractionDigits: 2 }) + '\u00a0zł';
 const fmtDate = d => d.toLocaleString('pl-PL', { dateStyle: 'short', timeStyle: 'short' });
 const shorten = (s, n) => s.length > n ? s.slice(0, n - 1) + '…' : s;
 
@@ -508,9 +691,12 @@ function baseOptions(yTitle) {
   };
 }
 
-// Punkty sa ukryte (linia schodkowa), ale z jednego pomiaru nie powstanie linia -
-// wtedy pokazujemy kropke, zeby nowy produkt / sklep byl widoczny na wykresie.
-const singlePoint = rows => rows.length < 2 ? { pointRadius: 4 } : {};
+// Punkty sa ukryte (linia schodkowa) poza miejscami zmiany ceny - tam kropka,
+// zeby zmiany bylo widac. Z jednego pomiaru nie powstanie linia - wtedy tez kropka.
+function changePoints(values) {
+  if (values.length < 2) return { pointRadius: 4 };
+  return { pointRadius: values.map((v, i) => i > 0 && v != null && values[i - 1] != null && v !== values[i - 1] ? 3 : 0) };
+}
 
 // ---------------- Widok: lista produktow ----------------
 
@@ -555,7 +741,7 @@ function renderList(groups, shops, openGroup) {
       const last = p.rows[p.rows.length - 1];
       const a = document.createElement('a');
       a.href = p.url || '#'; a.target = '_blank'; a.rel = 'noopener';
-      a.textContent = fmtPriceShort(last.effective).replace(/ zł$/, '');
+      a.textContent = fmtPriceShort(last.effective).replace(/\u00a0zł$/, '');
       a.appendChild(Object.assign(document.createElement('span'), { className: 'cur', textContent: ' zł' }));
       a.title = `${p.title} – ${fmtPrice(last.effective)}, sprawdzono ${fmtDate(last.t)}`;
       td.appendChild(a);
@@ -629,7 +815,7 @@ function renderShops(offers, mode) {
           data: p.rows.map(r => ({ x: r.t, y: r[field] })),
           borderColor: color, backgroundColor: color, borderDash: dash,
           borderWidth: dash.length ? 2.5 : 2,
-          ...singlePoint(p.rows),
+          ...changePoints(p.rows.map(r => r[field])),
           // przerywane linie na wierzchu (nizszy order = wyzej), zeby nie znikaly pod ciagla
           order: -shopIndex(p.shop),
           stepped: 'before',
@@ -738,11 +924,13 @@ function renderProduct(p) {
           label: 'Cena regularna',
           data: p.rows.map(r => ({ x: r.t, y: r.price })),
           borderColor: regular, backgroundColor: regular, stepped: 'before',
+          ...changePoints(p.rows.map(r => r.price)),
         },
         {
           label: 'Cena promocyjna',
           data: p.rows.map(r => ({ x: r.t, y: r.sale })),
           borderColor: promo, backgroundColor: promo, stepped: 'before', spanGaps: false,
+          ...changePoints(p.rows.map(r => r.sale)),
         },
       ],
     },
@@ -788,7 +976,7 @@ function renderCompare(products, shop, mode) {
       borderColor: color, backgroundColor: color, borderDash: dash,
       stepped: 'before',
       hidden: hiddenKeys.has(p.key),
-      ...singlePoint(p.rows),
+      ...changePoints(p.rows.map(r => r[field])),
     };
   });
 
@@ -886,6 +1074,523 @@ function setAllVisible(visible) {
   compareChart.update();
 }
 
+// ---------------- Zmiany cen: analiza ----------------
+
+const HOUR = 3600e3, DAY = 24 * HOUR;
+// starsza obserwacja nie jest juz "aktualna cena" (np. sklep mial przerwe po blokadzie)
+const MAX_AGE = 3 * HOUR;
+
+const fmtPct = (v, digits = 1) => v == null || !Number.isFinite(v) ? '–' :
+  (v > 0.05 ? '+' : v < -0.05 ? '−' : '') + Math.abs(v).toLocaleString('pl-PL', { maximumFractionDigits: digits }) + '%';
+function fmtDuration(ms) {
+  const h = ms / HOUR;
+  if (h < 1) return '< 1 h';
+  if (h < 48) return Math.round(h) + ' h';
+  return (h / 24).toLocaleString('pl-PL', { maximumFractionDigits: 1 }) + ' dni';
+}
+function median(values) {
+  if (!values.length) return null;
+  const s = [...values].sort((a, b) => a - b), m = s.length >> 1;
+  return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2;
+}
+function el(tag, props = {}, ...children) {
+  const e = Object.assign(document.createElement(tag), props);
+  e.append(...children.filter(c => c != null));
+  return e;
+}
+const sub = (text, cls = '') => el('span', { className: ('sub ' + cls).trim(), textContent: text });
+
+// ostatni pomiar oferty nie pozniejszy niz t (i nie starszy niz MAX_AGE)
+function rowAt(p, t) {
+  let lo = 0, hi = p.rows.length - 1, best = null;
+  while (lo <= hi) {
+    const mid = (lo + hi) >> 1;
+    if (+p.rows[mid].t <= t) { best = p.rows[mid]; lo = mid + 1; } else hi = mid - 1;
+  }
+  return best && best.effective != null && t - best.t <= MAX_AGE ? best : null;
+}
+
+// Zmiana = inna cena aktualna niz w poprzednim pomiarze tej samej oferty.
+function findChanges(products, groups) {
+  const events = [];
+  for (const p of products.values()) {
+    let prev = null;
+    for (const r of p.rows) {
+      if (r.effective == null) continue;
+      if (prev && r.effective !== prev.effective) {
+        events.push({
+          p, t: +r.t, from: prev.effective, to: r.effective,
+          pct: (r.effective / prev.effective - 1) * 100,
+          promoStart: r.sale != null && prev.sale == null,
+          promoEnd: r.sale == null && prev.sale != null,
+        });
+      }
+      prev = r;
+    }
+  }
+  events.sort((a, b) => a.t - b.t);
+  for (const e of events) e.position = positionChange(e, groups.get(e.p.group) || [e.p]);
+  return events;
+}
+
+// czy zmiana dala sklepowi pozycje najtanszego ('gain') albo mu ja odebrala ('loss')
+function positionChange(e, offers) {
+  const others = offers.filter(o => o !== e.p);
+  const live = t => others.map(o => rowAt(o, t)).filter(r => r && !isUnavailable(r.availability)).map(r => r.effective);
+  const before = live(e.t - 1), after = live(e.t);
+  if (!before.length || !after.length) return '';
+  const wasBest = e.from <= Math.min(...before), isBest = e.to <= Math.min(...after);
+  return !wasBest && isBest ? 'gain' : wasBest && !isBest ? 'loss' : '';
+}
+
+const REACTIONS = {
+  match: 'dopasowanie ceny',
+  undercut: 'podcięcie',
+  same: 'w tym samym kierunku',
+  opposite: 'w przeciwnym kierunku',
+};
+const REACTION_SHORT = { match: 'dopas.', undercut: 'podc.', same: 'ten sam kier.', opposite: 'przeciwny kier.' };
+
+function classifyReaction(A, B) {
+  if (Math.abs(B.to - A.to) <= Math.max(1, A.to * 0.005)) return 'match';
+  if (B.to < B.from && B.to < A.to) return 'undercut';
+  return Math.sign(B.to - B.from) === Math.sign(A.to - A.from) ? 'same' : 'opposite';
+}
+
+// Dla kazdej zmiany A: pierwsza zmiana B tego samego produktu w innym sklepie
+// w oknie czasu, zanim sklep A zmienil cene ponownie. Zmiany w tym samym
+// pomiarze (ta sama godzina) liczymy osobno - nie wiadomo, kto byl pierwszy.
+function findReactions(events, groups, windowMs) {
+  const byOffer = new Map();
+  for (const e of events) {
+    if (!byOffer.has(e.p)) byOffer.set(e.p, []);
+    byOffer.get(e.p).push(e);
+  }
+  const pairs = [], opportunities = new Map(), simultaneous = [];
+  for (const A of events) {
+    const own = byOffer.get(A.p);
+    const next = own[own.indexOf(A) + 1];
+    const limit = Math.min(A.t + windowMs, next ? next.t - 1 : Infinity);
+    for (const o of groups.get(A.p.group) || []) {
+      if (o.shop === A.p.shop || !rowAt(o, A.t)) continue;
+      const k = A.p.shop + '\n' + o.shop;
+      opportunities.set(k, (opportunities.get(k) || 0) + 1);
+      const list = byOffer.get(o) || [];
+      const same = list.find(B => B.t === A.t);
+      if (same) {
+        if (A.p.shop < o.shop) simultaneous.push([A, same]);
+        continue;
+      }
+      const B = list.find(B => B.t > A.t && B.t <= limit);
+      if (B) pairs.push({ A, B, delay: B.t - A.t, type: classifyReaction(A, B) });
+    }
+  }
+  return { pairs, opportunities, simultaneous };
+}
+
+// Srednia "premia" sklepu ponad najtansza dostepna oferte, w kazdym pomiarze.
+function computePosition(products, groups) {
+  const times = [...new Set([...products.values()].flatMap(p => p.rows.map(r => +r.t)))].sort((a, b) => a - b);
+  const series = new Map(), cells = new Map();
+  for (const T of times) {
+    const perShop = new Map();
+    for (const [name, offers] of groups) {
+      const live = offers.map(o => [o, rowAt(o, T)]).filter(([, r]) => r && !isUnavailable(r.availability));
+      if (live.length < 2) continue;
+      const min = Math.min(...live.map(([, r]) => r.effective));
+      for (const [o, r] of live) {
+        const premium = (r.effective / min - 1) * 100;
+        const acc = perShop.get(o.shop) || { sum: 0, n: 0 };
+        acc.sum += premium; acc.n++;
+        perShop.set(o.shop, acc);
+        const key = name + '\n' + o.shop;
+        const c = cells.get(key) || { sum: 0, n: 0, best: 0 };
+        c.sum += premium; c.n++; if (r.effective === min) c.best++;
+        cells.set(key, c);
+      }
+    }
+    for (const [shop, acc] of perShop) {
+      if (!series.has(shop)) series.set(shop, []);
+      series.get(shop).push({ x: T, y: acc.sum / acc.n, n: acc.n });
+    }
+  }
+  return { series, cells };
+}
+
+// Promocja = ciag pomiarow z cena promocyjna.
+function findPromos(products) {
+  const promos = [];
+  for (const p of products.values()) {
+    let cur = null;
+    p.rows.forEach((r, i) => {
+      if (r.sale != null) {
+        if (!cur) cur = { p, start: +r.t, knownStart: i > 0, rows: [] };
+        cur.rows.push(r);
+      } else if (cur) {
+        cur.end = +r.t;
+        promos.push(cur);
+        cur = null;
+      }
+    });
+    if (cur) { cur.end = null; promos.push(cur); }
+  }
+  for (const e of promos) {
+    const first = e.rows[0], last = e.rows[e.rows.length - 1];
+    e.duration = (e.end ?? +last.t) - e.start;
+    const discounts = e.rows.map(r => (1 - r.sale / r.price) * 100).filter(Number.isFinite);
+    e.discount = discounts.length ? Math.max(...discounts) : null;
+    e.minSale = Math.min(...e.rows.map(r => r.sale));
+    e.regular = first.price;
+    const before = e.p.rows.filter(r => +r.t < e.start && +r.t >= e.start - 30 * DAY);
+    e.history = before.length ? e.start - before[0].t : 0;
+    const eff = before.map(r => r.effective).filter(v => v != null);
+    e.low30 = eff.length ? Math.min(...eff) : null;
+    e.vsLow30 = e.low30 ? (e.minSale / e.low30 - 1) * 100 : null;
+    const regs = before.map(r => r.price).filter(v => v != null);
+    e.regBefore = regs.length ? Math.min(...regs) : null;
+    e.regRaised = e.regBefore != null && e.regular != null && e.regular > e.regBefore * 1.005;
+  }
+  return promos.sort((a, b) => b.start - a.start);
+}
+
+function computeVolatility(products, events) {
+  const byOffer = new Map();
+  for (const e of events) {
+    if (!byOffer.has(e.p)) byOffer.set(e.p, []);
+    byOffer.get(e.p).push(e);
+  }
+  return [...products.values()].map(p => {
+    const evs = byOffer.get(p) || [];
+    const values = p.rows.map(r => r.effective).filter(v => v != null);
+    const span = p.rows.length ? p.rows[p.rows.length - 1].t - p.rows[0].t : 0;
+    const abs = evs.map(e => Math.abs(e.pct));
+    const min = values.length ? Math.min(...values) : null, max = values.length ? Math.max(...values) : null;
+    return {
+      p, changes: evs.length, span,
+      rate: evs.length / Math.max(span / DAY, 1),
+      avg: abs.length ? abs.reduce((a, b) => a + b, 0) / abs.length : null,
+      max: abs.length ? Math.max(...abs) : null,
+      range: min ? (max / min - 1) * 100 : null,
+      min, maxPrice: max,
+    };
+  });
+}
+
+function sparkline(p, color, w = 120, h = 28) {
+  const pts = p.rows.filter(r => r.effective != null);
+  if (pts.length < 2) return document.createTextNode('–');
+  const t0 = +pts[0].t, t1 = +pts[pts.length - 1].t;
+  const vs = pts.map(r => r.effective), lo = Math.min(...vs), hi = Math.max(...vs);
+  const x = t => 1 + (w - 2) * (t1 > t0 ? (t - t0) / (t1 - t0) : 0);
+  const y = v => hi > lo ? h - 2 - (h - 4) * (v - lo) / (hi - lo) : h / 2;
+  let d = `M${x(+pts[0].t).toFixed(1)} ${y(vs[0]).toFixed(1)}`;
+  for (let i = 1; i < pts.length; i++) d += ` H${x(+pts[i].t).toFixed(1)} V${y(vs[i]).toFixed(1)}`;
+  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  svg.setAttribute('class', 'spark');
+  svg.setAttribute('width', w); svg.setAttribute('height', h);
+  svg.setAttribute('viewBox', `0 0 ${w} ${h}`);
+  const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+  path.setAttribute('d', d);
+  path.setAttribute('fill', 'none'); path.setAttribute('stroke', color); path.setAttribute('stroke-width', '1.5');
+  svg.appendChild(path);
+  return svg;
+}
+
+// ---------------- Zmiany cen: widoki ----------------
+
+function productButton(name, openGroup) {
+  const b = el('button', { className: 'linkbtn product-btn', textContent: shorten(name, 64), title: name });
+  b.addEventListener('click', () => openGroup(name));
+  return b;
+}
+// nazwa produktu, a pod nia sklep - jedna kolumna zamiast dwoch (waski ekran)
+function productShopCell(p, openGroup) {
+  const { color, dash } = shopStyle(p.shop);
+  return el('td', {}, productButton(p.group, openGroup),
+    el('span', { className: 'sub' }, el('span', { className: 'shop-cell' }, swatch(color, dash), p.shop)));
+}
+const fmtShortDate = t => new Date(t).toLocaleString('pl-PL', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+function shopCell(shop) {
+  const { color, dash } = shopStyle(shop);
+  return el('td', { className: 'nowrap' }, el('span', { className: 'shop-cell' }, swatch(color, dash), shop));
+}
+function emptyRow(tbody, cols, text) {
+  tbody.replaceChildren(el('tr', {}, el('td', { colSpan: cols, className: 'empty', textContent: text })));
+}
+function fillSelect(select, options, allLabel) {
+  select.replaceChildren(new Option(allLabel, ''), ...options.map(o => new Option(shorten(o, 60), o)));
+}
+
+function renderLog(events, openGroup) {
+  const shop = document.getElementById('logShop').value;
+  const group = document.getElementById('logGroup').value;
+  const dir = document.getElementById('logDir').value;
+  const list = events.filter(e => (!shop || e.p.shop === shop) && (!group || e.p.group === group) &&
+    (dir === 'all' || (dir === 'down' ? e.to < e.from : e.to > e.from))).reverse();
+
+  const down = list.filter(e => e.to < e.from).length;
+  const stats = [
+    ['Zmian', list.length],
+    ['Obniżek', down],
+    ['Podwyżek', list.length - down],
+    ['Mediana zmiany', fmtPct(median(list.map(e => Math.abs(e.pct))))],
+  ];
+  document.getElementById('logStats').replaceChildren(...stats.map(([label, value]) =>
+    el('div', { className: 'stat' }, label, el('b', { textContent: String(value) }))));
+
+  const body = document.getElementById('logBody');
+  if (!list.length) return emptyRow(body, 5, 'Brak zmian cen dla wybranych filtrów.');
+  const LIMIT = 300;
+  body.replaceChildren(...list.slice(0, LIMIT).map(e => {
+    const notes = [];
+    if (e.position === 'gain') notes.push(el('span', { className: 'down', textContent: 'zostaje najtańszym' }));
+    if (e.position === 'loss') notes.push(el('span', { className: 'up', textContent: 'traci pozycję najtańszego' }));
+    if (e.promoStart) notes.push(sub('start promocji', 'promo'));
+    if (e.promoEnd) notes.push(sub('koniec promocji'));
+    const change = el('td', { className: 'num nowrap' },
+      el('b', { textContent: fmtPriceShort(e.to) }), sub('było ' + fmtPriceShort(e.from)));
+    return el('tr', {},
+      el('td', { className: 'nowrap', textContent: fmtShortDate(e.t), title: fmtDate(new Date(e.t)) }),
+      productShopCell(e.p, openGroup),
+      change,
+      el('td', { className: 'num ' + (e.to < e.from ? 'down' : 'up'), textContent: fmtPct(e.pct) }),
+      el('td', { className: 'opt' }, ...notes.flatMap((n, i) => i ? [' · ', n] : [n])),
+    );
+  }));
+  if (list.length > LIMIT) {
+    body.append(el('tr', {}, el('td', { colSpan: 5, className: 'hint', textContent: `Pokazano ${LIMIT} najnowszych z ${list.length} zmian – zawęź filtry.` })));
+  }
+}
+
+function renderReactions(events, groups, shops, openGroup) {
+  const hours = Number(document.getElementById('reactWindow').value);
+  const { pairs, opportunities, simultaneous } = findReactions(events, groups, hours * HOUR);
+
+  const matrix = document.getElementById('reactMatrix');
+  const head = el('tr', {}, el('th', { textContent: 'Pierwszy ↓ / reaguje →' }),
+    ...shops.map(s => el('th', { className: 'num', textContent: s })));
+  const rows = shops.map(a => el('tr', {},
+    el('th', { className: 'row-head', scope: 'row' }, el('span', { className: 'shop-cell' }, swatch(shopStyle(a).color, shopStyle(a).dash), a)),
+    ...shops.map(b => {
+      if (a === b) return el('td', { className: 'cell-rate muted', textContent: '—' });
+      const ps = pairs.filter(x => x.A.p.shop === a && x.B.p.shop === b);
+      const opp = opportunities.get(a + '\n' + b) || 0;
+      const td = el('td', { className: 'cell-rate' });
+      if (!opp) { td.append(el('span', { className: 'muted', textContent: 'brak wspólnych produktów' })); return td; }
+      td.append(el('b', { textContent: `${ps.length} z ${opp}` }), sub(fmtPct(ps.length / opp * 100, 0).replace('+', '') + ' zmian'));
+      if (ps.length) {
+        td.style.background = `color-mix(in srgb, var(--s1) ${Math.round(8 + 40 * ps.length / opp)}%, transparent)`;
+        td.append(sub('mediana ' + fmtDuration(median(ps.map(x => x.delay)))));
+        const counts = Object.keys(REACTIONS).map(k => [k, ps.filter(x => x.type === k).length]).filter(([, n]) => n);
+        td.append(sub(counts.map(([k, n]) => `${n} ${REACTION_SHORT[k]}`).join(' · ')));
+      }
+      return td;
+    })));
+  matrix.replaceChildren(el('thead', {}, head), el('tbody', {}, ...rows));
+
+  const body = document.getElementById('reactBody');
+  const who = (e, withTime) => {
+    const td = el('td', { className: 'nowrap' });
+    td.append(el('span', { className: 'shop-cell' }, swatch(shopStyle(e.p.shop).color, shopStyle(e.p.shop).dash), e.p.shop));
+    td.append(sub(`${withTime ? fmtShortDate(e.t) + ': ' : ''}${fmtPriceShort(e.from)} → ${fmtPriceShort(e.to)} (${fmtPct(e.pct)})`));
+    return td;
+  };
+  if (!pairs.length) emptyRow(body, 4, 'Brak reakcji w wybranym oknie czasu.');
+  else body.replaceChildren(...[...pairs].sort((x, y) => y.A.t - x.A.t).slice(0, 200).map(x => el('tr', {},
+    el('td', {}, productButton(x.A.p.group, openGroup)),
+    who(x.A, true), who(x.B, false),
+    el('td', {}, el('b', { textContent: fmtDuration(x.delay) }), sub(REACTIONS[x.type])),
+  )));
+  document.getElementById('reactNote').textContent = simultaneous.length
+    ? `Dodatkowo ${simultaneous.length} ${simultaneous.length === 1 ? 'raz' : 'razy'} dwa sklepy zmieniły cenę tego samego produktu w tym samym pomiarze – przy pomiarze co godzinę nie wiadomo, który był pierwszy.`
+    : '';
+}
+
+function renderHeatmap(events, products, shops) {
+  const DAYS = ['Pn', 'Wt', 'Śr', 'Cz', 'Pt', 'So', 'Nd'];
+  const slot = t => { const d = new Date(t); return [(d.getDay() + 6) % 7, d.getHours()]; };
+  const data = shops.map(shop => {
+    const counts = DAYS.map(() => Array(24).fill(0));
+    // pomiary w polu = liczba roznych dni, w ktorych w tej godzinie byl pomiar sklepu
+    const seen = DAYS.map(() => Array.from({ length: 24 }, () => new Set()));
+    for (const p of products.values()) {
+      if (p.shop !== shop) continue;
+      for (const r of p.rows) { const [d, h] = slot(+r.t); seen[d][h].add(new Date(r.t).toDateString()); }
+    }
+    let total = 0;
+    for (const e of events) if (e.p.shop === shop) { const [d, h] = slot(e.t); counts[d][h]++; total++; }
+    return { shop, counts, obs: seen.map(row => row.map(set => set.size)), total };
+  });
+  const max = Math.max(1, ...data.flatMap(d => d.counts.flat()));
+
+  document.getElementById('heatWrap').replaceChildren(...data.map(d => {
+    const grid = el('div', { className: 'heat' });
+    grid.append(el('span'));
+    for (let h = 0; h < 24; h++) grid.append(el('span', { className: 'hl', textContent: h % 3 === 0 ? String(h) : '' }));
+    DAYS.forEach((day, i) => {
+      grid.append(el('span', { textContent: day }));
+      for (let h = 0; h < 24; h++) {
+        const n = d.counts[i][h], o = d.obs[i][h];
+        const c = el('span', { className: 'c' + (o ? '' : ' none') });
+        c.title = `${day} ${h}:00–${h}:59 – ${n} ${n === 1 ? 'zmiana' : 'zmian'}, dni z pomiarami: ${o}`;
+        if (n) c.style.background = `color-mix(in srgb, var(--s1) ${Math.round(15 + 85 * n / max)}%, transparent)`;
+        grid.append(c);
+      }
+    });
+    return el('div', {}, el('div', { className: 'heat-title' }, d.shop + ' ', el('span', { textContent: `(${d.total} zmian)` })), grid);
+  }));
+}
+
+let positionChart;
+function renderPosition(products, groups, shops, openGroup) {
+  const { series, cells } = computePosition(products, groups);
+  const options = baseOptions('% powyżej najtańszego');
+  options.plugins.legend.position = 'top';
+  options.plugins.legend.labels.sort = (a, b) => shopIndex(a.text) - shopIndex(b.text);
+  options.scales.y.ticks.callback = v => v.toLocaleString('pl-PL') + '%';
+  options.plugins.tooltip.callbacks.label = ctx =>
+    ` ${ctx.dataset.label}: ${fmtPct(ctx.parsed.y)} (produktów: ${ctx.raw.n})`;
+  if (positionChart) positionChart.destroy();
+  positionChart = new Chart(document.getElementById('positionChart'), {
+    type: 'line',
+    data: {
+      datasets: shops.filter(s => series.has(s)).map(shop => {
+        const { color, dash } = shopStyle(shop);
+        return {
+          label: shop, data: series.get(shop),
+          borderColor: color, backgroundColor: color, borderDash: dash,
+          borderWidth: dash.length ? 2.5 : 2, order: -shopIndex(shop), stepped: 'before',
+          ...(series.get(shop).length < 2 ? { pointRadius: 4 } : {}),
+        };
+      }),
+    },
+    options,
+  });
+
+  document.getElementById('positionHead').replaceChildren(
+    el('th', { textContent: 'Produkt' }), ...shops.map(s => el('th', { className: 'num', textContent: s })));
+  const body = document.getElementById('positionBody');
+  const names = [...groups.keys()].filter(name => shops.some(s => cells.has(name + '\n' + s)));
+  if (!names.length) return emptyRow(body, shops.length + 1, 'Brak produktów z cenami w co najmniej dwóch sklepach naraz.');
+  const cell = c => {
+    if (!c) return el('td', { className: 'num muted', textContent: '–' });
+    const avg = c.sum / c.n;
+    return el('td', { className: 'num nowrap' }, el('b', { textContent: avg < 0.05 ? '0%' : fmtPct(avg) }),
+      sub(`najtańszy ${Math.round(c.best / c.n * 100)}% czasu`));
+  };
+  const total = shop => {
+    const cs = names.map(n => cells.get(n + '\n' + shop)).filter(Boolean);
+    return cs.length ? cs.reduce((a, c) => ({ sum: a.sum + c.sum, n: a.n + c.n, best: a.best + c.best }), { sum: 0, n: 0, best: 0 }) : null;
+  };
+  body.replaceChildren(
+    ...names.map(name => el('tr', {}, el('td', {}, productButton(name, openGroup)), ...shops.map(s => cell(cells.get(name + '\n' + s))))),
+    el('tr', {}, el('td', {}, el('b', { textContent: 'Wszystkie produkty' })), ...shops.map(s => cell(total(s)))),
+  );
+}
+
+function renderPromos(products, shops, openGroup) {
+  const promos = findPromos(products);
+  const summary = document.getElementById('promoSummary');
+  summary.replaceChildren(...shops.map(shop => {
+    const ps = promos.filter(e => e.p.shop === shop);
+    const ended = ps.filter(e => e.end != null);
+    const disc = ps.map(e => e.discount).filter(v => v != null);
+    const checked = ps.filter(e => e.regBefore != null);
+    return el('tr', {},
+      shopCell(shop),
+      el('td', { className: 'num', textContent: String(ps.length) }),
+      el('td', { className: 'num opt', textContent: String(ps.length - ended.length) }),
+      el('td', { className: 'num opt', textContent: ended.length ? fmtDuration(median(ended.map(e => e.duration))) : '–' }),
+      el('td', { className: 'num', textContent: disc.length ? fmtPct(-disc.reduce((a, b) => a + b, 0) / disc.length) : '–' }),
+      el('td', { className: 'num', textContent: checked.length ? `${checked.filter(e => e.regRaised).length} z ${checked.length}` : '–' }),
+    );
+  }));
+
+  const body = document.getElementById('promoBody');
+  if (!promos.length) return emptyRow(body, 6, 'Nie wykryto jeszcze żadnych promocji.');
+  body.replaceChildren(...promos.map(e => {
+    const start = el('td', { className: 'nowrap', textContent: (e.knownStart ? '' : '≤ ') + fmtShortDate(e.start) });
+    if (!e.knownStart) start.append(sub('trwała przy 1. pomiarze'));
+    const dur = el('td', { className: 'num nowrap', textContent: fmtDuration(e.duration) });
+    if (e.end == null) dur.append(sub('trwa'));
+    const short = e.history < 7 * DAY;
+    const vs = el('td', { className: 'num opt nowrap' });
+    if (e.vsLow30 == null) vs.append(el('span', { className: 'muted', textContent: 'brak historii' }));
+    else {
+      vs.append(el('span', { className: e.vsLow30 > 0.5 ? 'flag' : '', textContent: fmtPct(e.vsLow30) }));
+      if (short) vs.append(sub(`historia: ${fmtDuration(e.history)}`));
+    }
+    const reg = el('td', { className: 'opt nowrap' });
+    if (e.regBefore == null) reg.append(el('span', { className: 'muted', textContent: 'brak historii' }));
+    else if (e.regRaised) reg.append(el('span', { className: 'flag', textContent: `podniesiona z ${fmtPriceShort(e.regBefore)}` }), sub(`do ${fmtPriceShort(e.regular)}`));
+    else reg.append(el('span', { textContent: 'bez zmian' }));
+    return el('tr', {},
+      productShopCell(e.p, openGroup), start, dur,
+      el('td', { className: 'num nowrap' }, el('b', { textContent: fmtPct(-e.discount) }), sub(`${fmtPriceShort(e.minSale)} zamiast ${fmtPriceShort(e.regular)}`)),
+      vs, reg,
+    );
+  }));
+}
+
+function renderVolatility(products, events, openGroup) {
+  const shop = document.getElementById('volShop').value;
+  const sort = document.getElementById('volSort').value;
+  const list = computeVolatility(products, events).filter(v => !shop || v.p.shop === shop);
+  const key = { rate: v => v.rate, max: v => v.max ?? -1, range: v => v.range ?? -1 }[sort];
+  list.sort((a, b) => key(b) - key(a) || b.changes - a.changes);
+  const body = document.getElementById('volBody');
+  if (!list.length) return emptyRow(body, 7, 'Brak danych.');
+  body.replaceChildren(...list.map(v => el('tr', {},
+    productShopCell(v.p, openGroup),
+    el('td', { className: 'num' }, el('b', { textContent: String(v.changes) }), sub('w ' + fmtDuration(v.span))),
+    el('td', { className: 'num', textContent: v.rate.toLocaleString('pl-PL', { maximumFractionDigits: 1 }) }),
+    el('td', { className: 'num opt', textContent: v.avg == null ? '–' : fmtPct(v.avg).replace('+', '') }),
+    el('td', { className: 'num', textContent: v.max == null ? '–' : fmtPct(v.max).replace('+', '') }),
+    el('td', { className: 'num opt nowrap' }, document.createTextNode(v.range == null ? '–' : fmtPct(v.range).replace('+', '')),
+      v.min != null && v.range > 0 ? sub(`${fmtPriceShort(v.min)}–${fmtPriceShort(v.maxPrice)}`) : null),
+    el('td', { className: 'opt' }, sparkline(v.p, shopStyle(v.p.shop).color)),
+  )));
+}
+
+// Zakladka "Zmiany cen" z podzakladkami; adres #zmiany-<podzakladka>.
+function setupChanges({ events, products, groups, shops, openGroup }) {
+  const SUBS = ['dziennik', 'reakcje', 'harmonogram', 'pozycja', 'promocje', 'zmiennosc'];
+  let current = 'dziennik';
+
+  fillSelect(document.getElementById('logShop'), shops, 'wszystkie');
+  fillSelect(document.getElementById('logGroup'), [...groups.keys()], 'wszystkie');
+  fillSelect(document.getElementById('volShop'), shops, 'wszystkie');
+
+  const renders = {
+    dziennik: () => renderLog(events, openGroup),
+    reakcje: () => renderReactions(events, groups, shops, openGroup),
+    harmonogram: () => renderHeatmap(events, products, shops),
+    pozycja: () => renderPosition(products, groups, shops, openGroup),
+    promocje: () => renderPromos(products, shops, openGroup),
+    zmiennosc: () => renderVolatility(products, events, openGroup),
+  };
+  for (const id of ['logShop', 'logGroup', 'logDir']) document.getElementById(id).addEventListener('change', renders.dziennik);
+  document.getElementById('reactWindow').addEventListener('change', renders.reakcje);
+  for (const id of ['volShop', 'volSort']) document.getElementById(id).addEventListener('change', renders.zmiennosc);
+
+  const buttons = [...document.querySelectorAll('.subtab')];
+  function show() {
+    for (const b of buttons) b.setAttribute('aria-selected', String(b.dataset.sub === current));
+    for (const id of SUBS) document.getElementById('sub-' + id).hidden = id !== current;
+    renders[current]();
+  }
+  for (const b of buttons) b.addEventListener('click', () => {
+    current = b.dataset.sub;
+    show();
+    history.replaceState(null, '', '#zmiany-' + current);
+  });
+  return {
+    show,
+    hash: () => '#zmiany-' + current,
+    setSub: name => { if (SUBS.includes(name)) current = name; },
+  };
+}
+
 // ---------------- Start ----------------
 
 (async function init() {
@@ -956,21 +1661,29 @@ function setAllVisible(visible) {
 
   // zakladki; wykres rysujemy dopiero na widocznej zakladce, zeby mial wymiary
   // adres strony#porownanie otwiera od razu zakladke porownania
-  const showList = () => renderList(groups, shops, name => {
+  // klik w nazwe produktu (lista, zmiany cen) otwiera jego porownanie sklepow
+  function openGroup(name) {
     groupSelect.value = name;
     selectTab(current = 'shops');
-  });
-  const tabs = { list: showList, shops: showShops, product: showProduct, compare: showCompare };
-  const HASH = { list: '#lista', shops: '#sklepy', product: '#produkt', compare: '#porownanie' };
+  }
+  const showList = () => renderList(groups, shops, openGroup);
+  const events = findChanges(products, groups);
+  const changes = setupChanges({ events, products, groups, shops, openGroup });
+  const tabs = { list: showList, changes: changes.show, shops: showShops, product: showProduct, compare: showCompare };
+  const HASH = { list: '#lista', changes: '#zmiany', shops: '#sklepy', product: '#produkt', compare: '#porownanie' };
   function selectTab(name) {
     for (const t of Object.keys(tabs)) {
       document.getElementById('tab-' + t).setAttribute('aria-selected', String(t === name));
       document.getElementById('view-' + t).hidden = t !== name;
     }
     tabs[name]();
-    history.replaceState(null, '', HASH[name]);
+    history.replaceState(null, '', name === 'changes' ? changes.hash() : HASH[name]);
   }
   let current = Object.keys(HASH).find(t => HASH[t] === location.hash) || 'list';
+  if (location.hash.startsWith('#zmiany')) {
+    current = 'changes';
+    changes.setSub(location.hash.slice('#zmiany-'.length));
+  }
   for (const t of Object.keys(tabs)) {
     document.getElementById('tab-' + t).addEventListener('click', () => selectTab(current = t));
   }
