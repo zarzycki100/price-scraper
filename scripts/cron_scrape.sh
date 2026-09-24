@@ -7,7 +7,7 @@
 # (klucz SSH z haslem nie zadziala z crona, bo nie ma tam ssh-agenta).
 #
 # Wpis w crontab (crontab -e):
-#   7,22,37,52 * * * * /sciezka/do/repo/scripts/cron_scrape.sh
+#   7,37 * * * * /sciezka/do/repo/scripts/cron_scrape.sh
 set -euo pipefail
 
 REPO_URL="${REPO_URL:-https://github.com/zarzycki100/price-scraper.git}"
