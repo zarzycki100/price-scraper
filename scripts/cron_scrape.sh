@@ -7,7 +7,7 @@
 # (klucz SSH z haslem nie zadziala z crona, bo nie ma tam ssh-agenta).
 #
 # Wpis w crontab (crontab -e):
-#   17 * * * * /sciezka/do/repo/scripts/cron_scrape.sh
+#   7,22,37,52 * * * * /sciezka/do/repo/scripts/cron_scrape.sh
 set -euo pipefail
 
 REPO_URL="${REPO_URL:-https://github.com/zarzycki100/price-scraper.git}"
@@ -29,9 +29,9 @@ if ! flock -n 9; then
   exit 0
 fi
 
-# losowe opoznienie startu (0-3 min) - zeby requesty nie przychodzily zawsze
-# rowno o :00/:15/:30/:45, co jest typowym sladem crona
-START_JITTER_MAX="${START_JITTER_MAX:-180}"
+# losowe opoznienie startu (0-2 min) - zeby requesty nie przychodzily zawsze
+# o tej samej minucie, co jest typowym sladem crona
+START_JITTER_MAX="${START_JITTER_MAX:-120}"
 sleep $((RANDOM % (START_JITTER_MAX + 1)))
 
 echo "===== $(date -Is) ====="

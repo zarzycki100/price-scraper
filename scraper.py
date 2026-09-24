@@ -9,7 +9,7 @@ wybiera parser na podstawie domeny (SHOPS) i wyciaga cene regularna, promocyjna
 i dostepnosc, a nastepnie dopisuje wiersz z wynikiem do data/prices.csv.
 Strona (docs/index.html) laczy ceny z products.csv po URL-u.
 
-Uruchamiane co godzine z lokalnego crona (scripts/cron_scrape.sh).
+Uruchamiane co 15 min z lokalnego crona (scripts/cron_scrape.sh).
 """
 
 import csv
@@ -68,9 +68,13 @@ PAGE_TIMEOUT_MS = 45_000
 # Losowa przerwa (w sekundach) miedzy kolejnymi produktami - rowne odstepy
 # co do milisekundy to typowy slad bota. Czasem robimy dluzsza pauze,
 # jak czlowiek, ktory zatrzymal sie na stronie produktu.
-DELAY_RANGE = (4, 12)
-LONG_PAUSE_CHANCE = 0.15
-LONG_PAUSE_RANGE = (15, 40)
+#
+# Przebieg (~45 stron w 3 sklepach) musi zmiescic sie w 15 min miedzy uruchomieniami
+# crona - okolo 10 s na strone razem z ladowaniem i przewijaniem. Sklepy sa
+# przeplatane (losowa kolejnosc), wiec kazdy dostaje zapytanie srednio co ~30 s.
+DELAY_RANGE = (3, 8)
+LONG_PAUSE_CHANCE = 0.05
+LONG_PAUSE_RANGE = (12, 25)
 
 # Odpowiedzi oznaczajace blokade / limit. Ponawiamy (z rosnaca przerwa) tylko
 # przeciazenie i limit - 403 od bot-managera to decyzja, a nie chwilowy blad,
