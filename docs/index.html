@@ -122,12 +122,23 @@
   table.legend tr:hover td { background: var(--chip-bg); }
   .toggle { display: flex; align-items: center; gap: .6rem; cursor: pointer; }
   .toggle input { margin: 0; }
+  .shop-cell { display: flex; align-items: center; gap: .6rem; }
   .swatch { flex: none; width: 28px; height: 12px; }
   .name { overflow-wrap: anywhere; }
   .name a { color: var(--text); text-decoration: none; }
   .name a:hover { color: var(--accent); text-decoration: underline; }
   .name .ext { color: var(--text-3); font-size: .8em; }
   @media (max-width: 600px) { table.legend .opt { display: none; } }
+
+  .summary { font-size: .95rem; color: var(--text-2); margin: 0 0 1rem; }
+  .summary b { color: var(--text); }
+  .best {
+    display: inline-block; margin-left: .4rem; font-size: .7rem; font-weight: 600;
+    color: var(--s3); border: 1px solid currentColor; border-radius: 999px; padding: 0 .45rem;
+    vertical-align: middle;
+  }
+  table.legend tr.cheapest td.now { font-weight: 700; }
+  .muted { color: var(--text-3); }
 
   .empty { color: var(--text-2); padding: 2rem 0; text-align: center; }
   [hidden] { display: none !important; }
@@ -139,11 +150,46 @@
 <p class="updated" id="lastUpdate">Wczytywanie danych...</p>
 
 <div class="tabs" role="tablist">
-  <button class="tab" role="tab" id="tab-product" aria-selected="true" aria-controls="view-product">Produkt</button>
-  <button class="tab" role="tab" id="tab-compare" aria-selected="false" aria-controls="view-compare">Porównanie w sklepie</button>
+  <button class="tab" role="tab" id="tab-shops" aria-selected="true" aria-controls="view-shops">Porównanie sklepów</button>
+  <button class="tab" role="tab" id="tab-product" aria-selected="false" aria-controls="view-product">Produkt w sklepie</button>
+  <button class="tab" role="tab" id="tab-compare" aria-selected="false" aria-controls="view-compare">Produkty w sklepie</button>
 </div>
 
-<section id="view-product" role="tabpanel" aria-labelledby="tab-product">
+<section id="view-shops" role="tabpanel" aria-labelledby="tab-shops">
+  <div class="card">
+    <div class="controls">
+      <label class="product-select">Produkt:
+        <select id="groupSelect"></select>
+      </label>
+      <label>Cena:
+        <select id="groupPriceMode">
+          <option value="effective">aktualna (z promocją)</option>
+          <option value="regular">regularna</option>
+        </select>
+      </label>
+    </div>
+    <p class="summary" id="groupSummary"></p>
+    <div class="chart-box"><canvas id="shopsChart"></canvas></div>
+    <div class="legend-wrap">
+      <table class="legend">
+        <thead>
+          <tr>
+            <th>Sklep</th>
+            <th class="num">Teraz</th>
+            <th class="num opt">Regularna</th>
+            <th class="num opt">Najniższa</th>
+            <th>Dostępność</th>
+            <th class="opt">Sprawdzono</th>
+          </tr>
+        </thead>
+        <tbody id="shopsBody"></tbody>
+      </table>
+      <p class="hint">Nazwa sklepu otwiera stronę produktu. Produkty łączone są według kolumny <code>product</code> w <code>products.csv</code>.</p>
+    </div>
+  </div>
+</section>
+
+<section id="view-product" role="tabpanel" aria-labelledby="tab-product" hidden>
   <div class="card">
     <div class="controls">
       <label class="product-select">Produkt:
@@ -201,30 +247,54 @@ const BRANCH = 'main';
 const SHOP_BY_HOST = {
   'www.mediaexpert.pl': 'Media Expert',
   'www.euro.com.pl': 'RTV Euro AGD',
+  'mediamarkt.pl': 'MediaMarkt',
 };
+// staly kolor sklepu na wykresie porownania sklepow
+const SHOP_ORDER = ['RTV Euro AGD', 'Media Expert', 'MediaMarkt'];
+
+// wartosci z Media Expert i schema.org/ItemAvailability (Euro, MediaMarkt)
+const AVAILABILITY_LABELS = {
+  available: 'dostępny',
+  unavailable: 'niedostępny',
+  selected_stores: 'w wybranych sklepach',
+  onlineonly: 'tylko online',
+  instoreonly: 'tylko w sklepach stacjonarnych',
+  limitedavailability: 'ograniczona dostępność',
+  preorder: 'przedsprzedaż',
+  presale: 'przedsprzedaż',
+  backorder: 'na zamówienie',
+  notavailable: 'niedostępny',
+  outofstock: 'niedostępny',
+  soldout: 'wyprzedany',
+  discontinued: 'wycofany',
+  mp_offer: 'u partnera (marketplace)',
+};
+const fmtAvailability = v => AVAILABILITY_LABELS[v] || v || '–';
+const UNAVAILABLE = new Set(['unavailable', 'notavailable', 'outofstock', 'soldout', 'discontinued']);
+const isUnavailable = v => UNAVAILABLE.has(v);
 
 // Kandydaci na lokalizacje CSV, sprawdzani po kolei:
 // 1. ../data/prices.csv - dziala lokalnie i gdy Pages serwuje katalog glowny repo,
 // 2. raw.githubusercontent.com - dziala, gdy Pages serwuje tylko /docs
 //    (wtedy data/ nie jest publikowane). Login i repo wyciagane z adresu strony.
-function csvCandidates() {
-  const urls = ['../data/prices.csv'];
+function csvCandidates(path) {
+  const urls = ['../' + path];
   const m = location.hostname.match(/^([^.]+)\.github\.io$/);
   const repo = location.pathname.split('/').filter(Boolean)[0];
   if (m && repo) {
-    urls.push(`https://raw.githubusercontent.com/${m[1]}/${repo}/${BRANCH}/data/prices.csv`);
+    urls.push(`https://raw.githubusercontent.com/${m[1]}/${repo}/${BRANCH}/${path}`);
   }
   return urls;
 }
 
-async function fetchCSVText() {
-  for (const url of csvCandidates()) {
+async function fetchCSVText(path) {
+  for (const url of csvCandidates(path)) {
     try {
       const res = await fetch(url, { cache: 'no-store' });
       if (res.ok) return await res.text();
     } catch (e) { /* probujemy nastepnego kandydata */ }
   }
-  throw new Error('Nie znaleziono pliku data/prices.csv');
+  throw new Error('Nie znaleziono pliku ' + path);
 }
 
 // Parser CSV zgodny z RFC 4180 (pola w cudzyslowach, przecinki i "" w srodku) -
@@ -252,8 +322,8 @@ function parseCSV(text) {
   return records;
 }
 
-async function loadCSV() {
-  const [headers, ...records] = parseCSV(await fetchCSVText());
+async function loadCSV(path) {
+  const [headers, ...records] = parseCSV(await fetchCSVText(path));
   if (!headers) return [];
   return records.map(cells => {
     const row = {};
@@ -285,12 +355,14 @@ function num(v) {
 
 // Grupowanie po sklepie + identyfikatorze, bo numery produktow moga sie
 // powtorzyc miedzy sklepami. Nazwa i link z najnowszego wiersza.
-function groupProducts(rows) {
+function groupProducts(rows, groupByUrl) {
   const products = new Map();
   for (const row of rows) {
     const shop = row.shop || SHOP_BY_HOST[hostOf(row.url)] || hostOf(row.url) || 'Nieznany sklep';
     const key = shop + '|' + (row.part_no || row.url || row.title);
     if (!products.has(key)) products.set(key, { key, shop, rows: [] });
+    // nazwa wspolna dla sklepow z products.csv (po URL-u); bez niej - tytul ze sklepu
+    if (groupByUrl.has(row.url)) products.get(key).group = groupByUrl.get(row.url);
     const p = products.get(key);
     const point = {
       t: new Date(row.timestamp),
@@ -303,8 +375,30 @@ function groupProducts(rows) {
     p.title = cleanTitle(row.title) || p.title || row.url;
     p.url = safeUrl(row.url) || p.url;
   }
-  for (const p of products.values()) p.rows.sort((a, b) => a.t - b.t);
+  for (const p of products.values()) {
+    p.rows.sort((a, b) => a.t - b.t);
+    p.group = p.group || p.title;
+  }
   return products;
+}
+
+// nazwa produktu -> lista jego ofert w sklepach; kolejnosc nazw jak w products.csv
+function groupAcrossShops(products, groupOrder) {
+  const groups = new Map(groupOrder.map(name => [name, []]));
+  for (const p of products.values()) {
+    if (!groups.has(p.group)) groups.set(p.group, []);
+    groups.get(p.group).push(p);
+  }
+  for (const [name, list] of groups) {
+    if (list.length === 0) groups.delete(name);
+    else list.sort((a, b) => shopIndex(a.shop) - shopIndex(b.shop));
+  }
+  return groups;
+}
+
+function shopIndex(shop) {
+  const i = SHOP_ORDER.indexOf(shop);
+  return i >= 0 ? i : SHOP_ORDER.length + shop.length;
 }
 
 const fmtPrice = v => v == null ? '–' :
@@ -359,6 +453,142 @@ function baseOptions(yTitle) {
   };
 }
 
+// Punkty sa ukryte (linia schodkowa), ale z jednego pomiaru nie powstanie linia -
+// wtedy pokazujemy kropke, zeby nowy produkt / sklep byl widoczny na wykresie.
+const singlePoint = rows => rows.length < 2 ? { pointRadius: 4 } : {};
+
+// ---------------- Widok: porownanie sklepow ----------------
+
+let shopsChart;
+
+function swatch(color, dash) {
+  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  svg.setAttribute('class', 'swatch');
+  svg.setAttribute('viewBox', '0 0 28 12');
+  const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+  Object.entries({ x1: 1, y1: 6, x2: 27, y2: 6, stroke: color, 'stroke-width': 3,
+    'stroke-linecap': 'round', 'stroke-dasharray': dash.join(' ') || 'none' })
+    .forEach(([k, v]) => line.setAttribute(k, v));
+  svg.appendChild(line);
+  return svg;
+}
+
+// Sklep = staly kolor i wzor linii. Rozne wzory sprawiaja, ze przy tej samej
+// cenie w kilku sklepach linie nie zaslaniaja sie calkowicie.
+const SHOP_DASHES = [[], [8, 5], [2, 4]];
+function shopStyle(shop) {
+  const i = shopIndex(shop);
+  return { color: css('--s' + (i % 8 + 1)), dash: SHOP_DASHES[i % SHOP_DASHES.length] };
+}
+
+function renderShops(offers, mode) {
+  const field = mode === 'regular' ? 'price' : 'effective';
+  const styleOf = p => shopStyle(p.shop);
+
+  const options = baseOptions('zł');
+  options.plugins.legend.display = false; // legenda jest w tabeli pod wykresem
+  if (shopsChart) shopsChart.destroy();
+  shopsChart = new Chart(document.getElementById('shopsChart'), {
+    type: 'line',
+    data: {
+      datasets: offers.map(p => {
+        const { color, dash } = styleOf(p);
+        return {
+          label: p.shop,
+          data: p.rows.map(r => ({ x: r.t, y: r[field] })),
+          borderColor: color, backgroundColor: color, borderDash: dash,
+          borderWidth: dash.length ? 2.5 : 2,
+          ...singlePoint(p.rows),
+          // przerywane linie na wierzchu (nizszy order = wyzej), zeby nie znikaly pod ciagla
+          order: -shopIndex(p.shop),
+          stepped: 'before',
+        };
+      }),
+    },
+    options,
+  });
+
+  // najtaniej teraz - wsrod dostepnych ofert, a gdy zadna nie jest dostepna - wsrod wszystkich
+  const latest = offers.map(p => ({ p, last: p.rows[p.rows.length - 1] }));
+  const priced = latest.filter(o => o.last[field] != null);
+  const available = priced.filter(o => !isUnavailable(o.last.availability));
+  const pool = available.length ? available : priced;
+  const cheapest = pool.reduce((best, o) => !best || o.last[field] < best.last[field] ? o : best, null);
+  const priciest = pool.reduce((worst, o) => !worst || o.last[field] > worst.last[field] ? o : worst, null);
+
+  const summary = document.getElementById('groupSummary');
+  summary.replaceChildren();
+  if (!cheapest) {
+    summary.textContent = 'Brak cen dla tego produktu.';
+  } else if (pool.length === 1) {
+    summary.append('Cena tylko z jednego sklepu: ');
+    const b = document.createElement('b');
+    b.textContent = `${cheapest.p.shop} – ${fmtPrice(cheapest.last[field])}`;
+    summary.append(b);
+  } else {
+    summary.append('Najtaniej teraz: ');
+    const b = document.createElement('b');
+    b.textContent = `${cheapest.p.shop} – ${fmtPrice(cheapest.last[field])}`;
+    summary.append(b);
+    const diff = priciest.last[field] - cheapest.last[field];
+    summary.append(diff > 0
+      ? ` (o ${fmtPrice(diff)} taniej niż ${priciest.p.shop})`
+      : ' (ta sama cena we wszystkich sklepach)');
+  }
+
+  const body = document.getElementById('shopsBody');
+  body.replaceChildren(...latest.map(({ p, last }) => {
+    const values = p.rows.map(r => r[field]).filter(v => v != null);
+    const { color, dash } = styleOf(p);
+    const tr = document.createElement('tr');
+    const isCheapest = cheapest && pool.length > 1 && last[field] === cheapest.last[field];
+    tr.classList.toggle('cheapest', isCheapest);
+
+    const tdName = document.createElement('td');
+    const wrap = document.createElement('span');
+    wrap.className = 'shop-cell';
+    const name = document.createElement('span');
+    name.className = 'name';
+    if (p.url) {
+      const a = document.createElement('a');
+      a.href = p.url; a.target = '_blank'; a.rel = 'noopener';
+      a.textContent = p.shop;
+      a.title = p.title;
+      const ext = document.createElement('span');
+      ext.className = 'ext';
+      ext.textContent = ' ↗';
+      a.appendChild(ext);
+      name.appendChild(a);
+    } else {
+      name.textContent = p.shop;
+    }
+    if (isCheapest) {
+      const best = document.createElement('span');
+      best.className = 'best';
+      best.textContent = 'najtaniej';
+      name.appendChild(best);
+    }
+    wrap.append(swatch(color, dash), name);
+    tdName.appendChild(wrap);
+
+    const cell = (text, cls) => {
+      const td = document.createElement('td');
+      td.className = cls;
+      td.textContent = text;
+      return td;
+    };
+    tr.append(
+      tdName,
+      cell(fmtPrice(last[field]), 'num now'),
+      cell(fmtPrice(last.price), 'num opt'),
+      cell(fmtPrice(values.length ? Math.min(...values) : null), 'num opt'),
+      cell(fmtAvailability(last.availability), isUnavailable(last.availability) ? 'muted' : ''),
+      cell(fmtDate(last.t), 'opt muted'),
+    );
+    return tr;
+  }));
+}
+
 // ---------------- Widok: pojedynczy produkt ----------------
 
 let productChart;
@@ -399,7 +629,7 @@ function renderProduct(p) {
     ['Cena regularna', fmtPrice(last.price)],
     ['Promocja', last.sale != null ? fmtPrice(last.sale) : '–'],
     ['Najniższa odnotowana', fmtPrice(effective.length ? Math.min(...effective) : null)],
-    ['Dostępność', last.availability === 'available' ? 'dostępny' : (last.availability || '–')],
+    ['Dostępność', fmtAvailability(last.availability)],
   ];
   const box = document.getElementById('stats');
   box.replaceChildren(...stats.map(([label, value]) => {
@@ -432,6 +662,7 @@ function renderCompare(products, shop, mode) {
       borderColor: color, backgroundColor: color, borderDash: dash,
       stepped: 'before',
       hidden: hiddenKeys.has(p.key),
+      ...singlePoint(p.rows),
     };
   });
 
@@ -460,14 +691,7 @@ function renderCompare(products, shop, mode) {
     cb.setAttribute('aria-label', 'Pokaż na wykresie: ' + p.title);
     cb.addEventListener('change', () => setVisible(p.key, cb.checked, tr));
 
-    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-    svg.setAttribute('class', 'swatch');
-    svg.setAttribute('viewBox', '0 0 28 12');
-    const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
-    Object.entries({ x1: 1, y1: 6, x2: 27, y2: 6, stroke: color, 'stroke-width': 3,
-      'stroke-linecap': 'round', 'stroke-dasharray': dash.join(' ') || 'none' })
-      .forEach(([k, v]) => line.setAttribute(k, v));
-    svg.appendChild(line);
+    const svg = swatch(color, dash);
 
     const name = document.createElement('span');
     name.className = 'name';
@@ -542,7 +766,7 @@ function setAllVisible(visible) {
   const status = document.getElementById('lastUpdate');
   let rows;
   try {
-    rows = await loadCSV();
+    rows = await loadCSV('data/prices.csv');
   } catch (e) {
     status.textContent = 'Błąd wczytywania danych: ' + e.message;
     return;
@@ -552,8 +776,23 @@ function setAllVisible(visible) {
     return;
   }
 
-  const products = groupProducts(rows);
-  const shops = [...new Set([...products.values()].map(p => p.shop))];
+  // products.csv jest opcjonalny - bez niego kazdy sklep to osobny produkt
+  let productList = [];
+  try { productList = await loadCSV('products.csv'); } catch (e) { /* brak pliku */ }
+  const groupByUrl = new Map(productList.filter(r => r.url && r.product).map(r => [r.url.trim(), r.product.trim()]));
+  const groupOrder = [...new Set(productList.map(r => (r.product || '').trim()).filter(Boolean))];
+
+  const products = groupProducts(rows, groupByUrl);
+  const groups = groupAcrossShops(products, groupOrder);
+  const shops = [...new Set([...products.values()].map(p => p.shop))]
+    .sort((a, b) => shopIndex(a) - shopIndex(b));
+
+  const groupSelect = document.getElementById('groupSelect');
+  for (const [name, offers] of groups) {
+    const n = offers.length;
+    groupSelect.add(new Option(`${name} (${n} ${n === 1 ? 'sklep' : n < 5 ? 'sklepy' : 'sklepów'})`, name));
+  }
+  const groupPriceMode = document.getElementById('groupPriceMode');
 
   // lista produktow pogrupowana po sklepach
   const productSelect = document.getElementById('productSelect');
@@ -577,6 +816,9 @@ function setAllVisible(visible) {
   }
   const priceMode = document.getElementById('priceMode');
 
+  const showShops = () => renderShops(groups.get(groupSelect.value), groupPriceMode.value);
+  groupSelect.addEventListener('change', showShops);
+  groupPriceMode.addEventListener('change', showShops);
   const showProduct = () => renderProduct(products.get(productSelect.value));
   const showCompare = () => renderCompare(products, shopSelect.value, priceMode.value);
   productSelect.addEventListener('change', showProduct);
@@ -587,8 +829,8 @@ function setAllVisible(visible) {
 
   // zakladki; wykres rysujemy dopiero na widocznej zakladce, zeby mial wymiary
   // adres strony#porownanie otwiera od razu zakladke porownania
-  const tabs = { product: showProduct, compare: showCompare };
-  const HASH = { product: '#produkt', compare: '#porownanie' };
+  const tabs = { shops: showShops, product: showProduct, compare: showCompare };
+  const HASH = { shops: '#sklepy', product: '#produkt', compare: '#porownanie' };
   function selectTab(name) {
     for (const t of Object.keys(tabs)) {
       document.getElementById('tab-' + t).setAttribute('aria-selected', String(t === name));
@@ -597,9 +839,10 @@ function setAllVisible(visible) {
     tabs[name]();
     history.replaceState(null, '', HASH[name]);
   }
-  let current = Object.keys(HASH).find(t => HASH[t] === location.hash) || 'product';
-  document.getElementById('tab-product').addEventListener('click', () => selectTab(current = 'product'));
-  document.getElementById('tab-compare').addEventListener('click', () => selectTab(current = 'compare'));
+  let current = Object.keys(HASH).find(t => HASH[t] === location.hash) || 'shops';
+  for (const t of Object.keys(tabs)) {
+    document.getElementById('tab-' + t).addEventListener('click', () => selectTab(current = t));
+  }
   selectTab(current);
 
   // przerysowanie po zmianie motywu systemu (kolory wykresu biora sie z CSS)

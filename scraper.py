@@ -1,10 +1,13 @@
 #!/usr/bin/env python3
 """
-Scraper cen produktow z Media Expert i RTV Euro AGD.
+Scraper cen produktow z RTV Euro AGD, Media Expert i MediaMarkt.
 
-Odczytuje liste URL-i produktow z products.txt, dla kazdego pobiera strone,
+Odczytuje liste produktow z products.csv (kolumny: product - wspolna nazwa
+produktu, url - strona produktu w jednym sklepie; ten sam produkt w kilku
+sklepach to kilka wierszy z ta sama nazwa). Dla kazdego URL-a pobiera strone,
 wybiera parser na podstawie domeny (SHOPS) i wyciaga cene regularna, promocyjna
 i dostepnosc, a nastepnie dopisuje wiersz z wynikiem do data/prices.csv.
+Strona (docs/index.html) laczy ceny z products.csv po URL-u.
 
 Uruchamiane co godzine z lokalnego crona (scripts/cron_scrape.sh).
 """
@@ -26,7 +29,7 @@ from urllib.parse import urlparse
 from bs4 import BeautifulSoup
 from playwright.sync_api import Page, sync_playwright
 
-PRODUCTS_FILE = Path("products.txt")
+PRODUCTS_FILE = Path("products.csv")
 OUTPUT_CSV = Path("data/prices.csv")
 
 # Stan miedzy przebiegami (przerwy po blokadach) i profil przegladarki z cookies.
@@ -53,7 +56,12 @@ FIELDNAMES = [
 # w trybie z oknem, na wirtualnym ekranie Xvfb: headless Chromium Akamai
 # rozpoznawal i blokowal (403), choc zwykla przegladarka z tego IP przechodzila.
 BROWSER_CHANNEL = "chrome"
-BROWSER_ARGS = ["--disable-blink-features=AutomationControlled", "--window-position=0,0"]
+BROWSER_ARGS = [
+    "--disable-blink-features=AutomationControlled",
+    "--window-position=0,0",
+    # zawsze X11 (Xvfb) - inaczej w sesji Wayland Chrome otwieralby okno na pulpicie
+    "--ozone-platform=x11",
+]
 VIEWPORTS = [(1920, 1080), (1536, 864), (1440, 900), (1366, 768), (1600, 900)]
 PAGE_TIMEOUT_MS = 45_000
 
@@ -189,21 +197,110 @@ def parse_euro(soup: BeautifulSoup, html: str) -> dict:
     }
 
 
+# onlineStatus z MediaMarkt -> wartosci takie jak w Media Expert
+MEDIAMARKT_STATUS = {
+    "AVAILABLE": "available",
+    "NOT_AVAILABLE": "unavailable",
+    "TEMPORARILY_NOT_AVAILABLE": "unavailable",
+    "PERMANENTLY_NOT_AVAILABLE": "unavailable",
+}
+
+
+def find_json_ld_product(soup: BeautifulSoup) -> dict | None:
+    """Pierwszy obiekt Product z JSON-LD (takze zagniezdzony, np. w BuyAction.object).
+
+    Produkty z wariantami (kolor, pojemnosc) sa opisane jako ProductGroup - jego
+    sku i offers dotycza ogladanego wariantu, wiec traktujemy go jak Product.
+    """
+    types = ("Product", "ProductGroup")
+    for tag in soup.find_all("script", type="application/ld+json"):
+        try:
+            data = json.loads(tag.string or "")
+        except json.JSONDecodeError:
+            continue
+        for item in data if isinstance(data, list) else [data]:
+            if not isinstance(item, dict):
+                continue
+            if item.get("@type") in types:
+                return item
+            nested = item.get("object")
+            if isinstance(nested, dict) and nested.get("@type") in types:
+                return nested
+    return None
+
+
+def parse_mediamarkt(soup: BeautifulSoup, html: str) -> dict:
+    """MediaMarkt: nazwa, SKU i cena koncowa z JSON-LD, pozostale ceny ze stanu aplikacji.
+
+    Stan (Apollo/GraphQL) ma dla kazdego produktu na stronie wpis
+    {"__typename":"CofrPriceFeature","id":"Media:pl:<SKU>", "price":{"amount":..},
+    "promoPrice":{"amount":..}, "strikePrice":{"amount":..}|null}. Sa tam tez
+    produkty polecane, wiec szukamy wpisu z SKU tego produktu.
+    """
+    product = find_json_ld_product(soup)
+    if product is None:
+        raise ValueError("brak danych JSON-LD Product na stronie")
+    sku = str(product.get("sku") or "")
+    offer = product.get("offers") or {}
+    if isinstance(offer, list):
+        offer = offer[0] if offer else {}
+    current = offer.get("price")
+    availability = (offer.get("availability") or "").rsplit("/", 1)[-1]
+    availability = AVAILABILITY.get(availability, availability.lower() or None)
+
+    regular = current
+    marker = f'{{"__typename":"CofrPriceFeature","id":"Media:pl:{sku}"'
+    pos = html.find(marker) if sku else -1
+    if pos >= 0:
+        feature, _ = json.JSONDecoder().raw_decode(html, pos)
+        amounts = {k: (feature.get(k) or {}).get("amount") for k in ("price", "promoPrice", "strikePrice")}
+        if current is None:
+            current = min((v for v in (amounts["price"], amounts["promoPrice"]) if v is not None), default=None)
+        # cena regularna = wyzsza z ceny bazowej i przekreslonej
+        candidates = [v for v in (amounts["price"], amounts["strikePrice"]) if v is not None]
+        if candidates:
+            regular = max(candidates)
+        status_pos = html.find(f'"CofrOnlineStatusFeature","id":"Media:pl:{sku}"')
+        if status_pos >= 0:
+            status = re.search(r'"onlineStatus":"(\w+)"', html[status_pos:status_pos + 2000])
+            if status:
+                availability = MEDIAMARKT_STATUS.get(status.group(1), status.group(1).lower())
+
+    sale = current if current is not None and regular is not None and float(current) < float(regular) else None
+    return {
+        "title": " ".join((product.get("name") or "").split()) or None,
+        "part_no": sku or None,
+        "price": format_price(regular if regular is not None else current),
+        "sale_price": format_price(sale),
+        "availability": availability,
+    }
+
+
 # domena -> (nazwa sklepu wyswietlana na stronie, parser)
 SHOPS = {
     "www.mediaexpert.pl": ("Media Expert", parse_media_expert),
     "www.euro.com.pl": ("RTV Euro AGD", parse_euro),
+    "mediamarkt.pl": ("MediaMarkt", parse_mediamarkt),
 }
 
 
 def load_products(path: Path) -> list[str]:
+    """URL-e z products.csv (kolumny product,url). Wiersze bez URL-a sa pomijane."""
     if not path.exists():
-        sys.exit(f"Brak pliku {path}. Utworz go i wklej po jednym URL na linie.")
+        sys.exit(f"Brak pliku {path}. Utworz go z kolumnami: product,url")
     urls = []
-    for line in path.read_text(encoding="utf-8").splitlines():
-        line = line.strip()
-        if line and not line.startswith("#"):
-            urls.append(line)
+    with path.open(newline="", encoding="utf-8") as f:
+        for row in csv.DictReader(f):
+            url = (row.get("url") or "").strip()
+            if not url or url.startswith("#"):
+                continue
+            if urlparse(url).hostname not in SHOPS:
+                print(f"UWAGA: nieobslugiwany sklep, pomijam: {url}", file=sys.stderr)
+                continue
+            if url in urls:
+                print(f"UWAGA: zdublowany URL, pomijam: {url}", file=sys.stderr)
+                continue
+            urls.append(url)
     return urls
 
 
@@ -271,7 +368,7 @@ def open_browser(state: dict):
             BROWSER_PROFILE_DIR,
             channel=BROWSER_CHANNEL,
             headless=False,
-            env={**os.environ, "DISPLAY": display},
+            env={**{k: v for k, v in os.environ.items() if k != "WAYLAND_DISPLAY"}, "DISPLAY": display},
             args=[*BROWSER_ARGS, f"--window-size={width},{height}"],
             # bez --enable-automation: pasek "Chrome jest kontrolowany..." i navigator.webdriver
             ignore_default_args=["--enable-automation"],

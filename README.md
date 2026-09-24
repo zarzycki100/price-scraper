@@ -1,6 +1,6 @@
-# Monitor cen Media Expert i RTV Euro AGD
+# Monitor cen RTV Euro AGD, Media Expert i MediaMarkt
 
-Automatyczny scraper cen produktów z mediaexpert.pl i euro.com.pl, uruchamiany co godzinę
+Automatyczny scraper cen produktów z euro.com.pl, mediaexpert.pl i mediamarkt.pl, uruchamiany co godzinę
 przez crona na lokalnym komputerze, z historią zapisywaną do CSV i wizualizacją na
 GitHub Pages.
 
@@ -9,9 +9,18 @@ GitHub Pages.
 1. **Stwórz nowe repozytorium na GitHub** i wgraj do niego wszystkie pliki
    z tego projektu (zachowując strukturę katalogów).
 
-2. **Dodaj produkty do śledzenia** — edytuj `products.txt`, jeden URL
-   produktu z mediaexpert.pl lub euro.com.pl na linię (sklep jest
-   rozpoznawany po domenie).
+2. **Dodaj produkty do śledzenia** — edytuj `products.csv` (kolumny
+   `product,url`). Jeden wiersz = strona produktu w jednym sklepie; ten sam
+   produkt w kilku sklepach to kilka wierszy z tą samą nazwą w kolumnie
+   `product` — po niej strona porównuje ceny między sklepami. Sklep jest
+   rozpoznawany po domenie URL-a:
+   ```
+   product,url
+   Router ASUS TUF Gaming AX3000 V2,https://www.euro.com.pl/routery/asus-router-asus-tuf-ax3000-v2.bhtml
+   Router ASUS TUF Gaming AX3000 V2,https://mediamarkt.pl/pl/product/_router-asus-tuf-ax3000-v2-1469486.html
+   ```
+   Strona łączy historię cen z nazwami po URL-u, więc zmiana nazwy
+   w `products.csv` działa też dla starszych danych.
 
 3. **Włącz uprawnienia do zapisu dla Actions:**
    Settings → Actions → General → Workflow permissions →
@@ -49,10 +58,14 @@ GitHub Pages.
    Stan scrapera (przerwy po blokadach) jest w `~/.local/state/price-scraper/state.json`,
    a profil przeglądarki z cookies w `~/.local/state/price-scraper/browser-profile/` —
    usuń oba, żeby zacząć od zera.
-   Strona na GitHub Pages odczytuje `data/prices.csv` na żywo i ma dwa widoki:
-   - **Produkt** — historia ceny regularnej i promocyjnej jednego produktu
-     (lista pogrupowana po sklepach, z oznaczeniem sklepu i linkiem),
-   - **Porównanie w sklepie** (`#porownanie` w adresie) — ceny wszystkich
+   Strona na GitHub Pages odczytuje `data/prices.csv` i `products.csv` na żywo
+   i ma trzy widoki:
+   - **Porównanie sklepów** (`#sklepy`, domyślny) — jeden produkt, linia ceny
+     w każdym sklepie, tabela z ceną teraz / regularną / najniższą,
+     dostępnością i oznaczeniem, gdzie jest najtaniej,
+   - **Produkt w sklepie** (`#produkt`) — historia ceny regularnej i promocyjnej
+     jednego produktu w jednym sklepie,
+   - **Produkty w sklepie** (`#porownanie`) — ceny wszystkich
      produktów z wybranego sklepu na jednym wykresie, z legendą-tabelą pod
      wykresem (nazwy z linkami, cena teraz / najniższa / najwyższa,
      ukrywanie pojedynczych linii).
@@ -61,14 +74,14 @@ GitHub Pages.
 
 W `scraper.py` dopisz funkcję `parse_<sklep>(soup, html)` zwracającą
 `title`, `part_no`, `price`, `sale_price`, `availability` i dodaj domenę do
-słownika `SHOPS`. Na stronie warto dopisać domenę do `SHOP_BY_HOST`
-w `docs/index.html` (używane tylko dla starych wierszy bez kolumny `shop`).
+słownika `SHOPS`. W `docs/index.html` dopisz domenę do `SHOP_BY_HOST`
+i nazwę sklepu do `SHOP_ORDER` (stały kolor i wzór linii sklepu na wykresie).
 
 ## Struktura plików
 
 ```
 scraper.py                     - skrypt scrapujący (Playwright/Chrome + BeautifulSoup)
-products.txt                   - lista URL-i produktów do monitorowania
+products.csv                   - produkty do monitorowania (nazwa + URL w sklepie)
 requirements.txt               - zależności Pythona
 data/prices.csv                - historia cen (tworzona automatycznie)
 docs/index.html                - strona z wykresem (Chart.js) dla GitHub Pages
