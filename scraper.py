@@ -296,6 +296,24 @@ def get_with_retry(session: requests.Session, url: str) -> requests.Response:
     raise Blocked(f"HTTP {resp.status_code}, blokada po {attempt + 1} probach")
 
 
+def has_cookies_for(session: requests.Session, host: str) -> bool:
+    domain = host.removeprefix("www.")
+    return any(domain in (c.domain or "") for c in session.cookies.jar)
+
+
+def warm_up(session: requests.Session, host: str) -> None:
+    """Wejscie na strone glowna sklepu przed produktami.
+
+    Przegladarka bez zadnych cookies wchodzaca prosto na strone produktu
+    wyglada dla Akamai (Euro) podejrzanie - po spadku reputacji IP takie
+    wejscia dostaja 403. Strona glowna ustawia cookies bot-managera
+    (ak_bmsc, bm_s ...), z ktorymi strony produktow przechodza.
+    """
+    print(f"Rozgrzewka: strona glowna {host}")
+    get_with_retry(session, f"https://{host}/")
+    human_pause()
+
+
 def fetch_product(session: requests.Session, url: str) -> dict:
     """Pobiera strone produktu i wyciaga dane cenowe parserem wlasciwym dla sklepu."""
     host = urlparse(url).hostname
@@ -354,6 +372,7 @@ def main() -> None:
     rows = []
     attempted = 0
     blocked: dict[str, int] = {}  # host -> liczba kolejnych blokad w tym przebiegu
+    warmed: set[str] = set()
     for url in urls:
         host = urlparse(url).hostname
         cooldown = cooldowns.get(host, {})
@@ -368,6 +387,9 @@ def main() -> None:
             human_pause()
         attempted += 1
         try:
+            if host not in warmed and not has_cookies_for(session, host):
+                warmed.add(host)
+                warm_up(session, host)
             data = fetch_product(session, url)
             blocked[host] = 0
             cooldowns.pop(host, None)
