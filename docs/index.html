@@ -283,14 +283,24 @@
       </table>
     </div>
     <p class="hint">Zmiana = inna cena aktualna (z promocją) niż w poprzednim pomiarze. Czas to moment wykrycia –
-      pomiar jest co godzinę, więc zmiana nastąpiła w ciągu godziny przed nim (dłużej, jeśli sklep miał przerwę po blokadzie).</p>
+      zmiana nastąpiła między poprzednim pomiarem a tym (przerwa bywa dłuższa, jeśli sklep miał przerwę po blokadzie).</p>
   </div>
 
   <div class="card" id="sub-reakcje" hidden>
     <p class="intro">Po każdej zmianie ceny w jednym sklepie sprawdzamy, czy inny sklep zmienił cenę tego samego
-      produktu w ciągu wybranego czasu (i zanim pierwszy sklep zmienił ją znowu).</p>
+      produktu w ciągu wybranego czasu (i zanim pierwszy sklep zmienił ją znowu).
+      <b>Okres</b> wybiera, które zmiany analizujemy; <b>reakcja w ciągu</b> – ile czasu drugi sklep ma na odpowiedź.</p>
     <div class="controls">
-      <label>Okno reakcji:
+      <label>Okres:
+        <select id="reactRange">
+          <option value="" selected>od początku</option>
+          <option value="24">ostatnie 24 h</option>
+          <option value="72">ostatnie 3 dni</option>
+          <option value="168">ostatnie 7 dni</option>
+          <option value="720">ostatnie 30 dni</option>
+        </select>
+      </label>
+      <label>Reakcja w ciągu:
         <select id="reactWindow">
           <option value="2">2 h</option>
           <option value="6" selected>6 h</option>
@@ -300,6 +310,7 @@
         </select>
       </label>
     </div>
+    <p class="summary" id="reactPeriod"></p>
     <div class="table-scroll"><table class="legend" id="reactMatrix"></table></div>
     <p class="hint">Wiersz – sklep, który zmienił cenę pierwszy; kolumna – sklep, który zmienił cenę po nim.
       „3 z 12” = 3 reakcje na 12 zmian, przy których sklep z kolumny miał ten produkt w ofercie.
@@ -1162,7 +1173,7 @@ function classifyReaction(A, B) {
 // Dla kazdej zmiany A: pierwsza zmiana B tego samego produktu w innym sklepie
 // w oknie czasu, zanim sklep A zmienil cene ponownie. Zmiany w tym samym
 // pomiarze (ta sama godzina) liczymy osobno - nie wiadomo, kto byl pierwszy.
-function findReactions(events, groups, windowMs) {
+function findReactions(events, groups, windowMs, from = -Infinity) {
   const byOffer = new Map();
   for (const e of events) {
     if (!byOffer.has(e.p)) byOffer.set(e.p, []);
@@ -1170,6 +1181,7 @@ function findReactions(events, groups, windowMs) {
   }
   const pairs = [], opportunities = new Map(), simultaneous = [];
   for (const A of events) {
+    if (A.t < from) continue; // okres: analizujemy tylko zmiany od tej chwili
     const own = byOffer.get(A.p);
     const next = own[own.indexOf(A) + 1];
     const limit = Math.min(A.t + windowMs, next ? next.t - 1 : Infinity);
@@ -1366,7 +1378,18 @@ function renderLog(events, openGroup) {
 
 function renderReactions(events, groups, shops, openGroup) {
   const hours = Number(document.getElementById('reactWindow').value);
-  const { pairs, opportunities, simultaneous } = findReactions(events, groups, hours * HOUR);
+  const range = document.getElementById('reactRange').value;
+  // okres liczony od ostatniego pomiaru, nie od "teraz" - dziala tez na starych danych
+  const lastT = Math.max(...[...groups.values()].flat().map(p => +p.rows[p.rows.length - 1].t));
+  const from = range ? lastT - Number(range) * HOUR : -Infinity;
+  const { pairs, opportunities, simultaneous } = findReactions(events, groups, hours * HOUR, from);
+
+  const inRange = events.filter(e => e.t >= from);
+  const period = document.getElementById('reactPeriod');
+  period.replaceChildren(
+    'Analizowane zmiany: ', el('b', { textContent: String(inRange.length) }),
+    inRange.length ? ` (${fmtShortDate(inRange[0].t)} – ${fmtShortDate(inRange[inRange.length - 1].t)})` : '',
+    `, reakcje: `, el('b', { textContent: String(pairs.length) }), '.');
 
   const matrix = document.getElementById('reactMatrix');
   const head = el('tr', {}, el('th', { textContent: 'Pierwszy ↓ / reaguje →' }),
@@ -1404,7 +1427,7 @@ function renderReactions(events, groups, shops, openGroup) {
     el('td', {}, el('b', { textContent: fmtDuration(x.delay) }), sub(REACTIONS[x.type])),
   )));
   document.getElementById('reactNote').textContent = simultaneous.length
-    ? `Dodatkowo ${simultaneous.length} ${simultaneous.length === 1 ? 'raz' : 'razy'} dwa sklepy zmieniły cenę tego samego produktu w tym samym pomiarze – przy pomiarze co godzinę nie wiadomo, który był pierwszy.`
+    ? `Dodatkowo ${simultaneous.length} ${simultaneous.length === 1 ? 'raz' : 'razy'} dwa sklepy zmieniły cenę tego samego produktu w tym samym pomiarze – nie wiadomo, który był pierwszy.`
     : '';
 }
 
@@ -1572,7 +1595,7 @@ function setupChanges({ events, products, groups, shops, openGroup }) {
     zmiennosc: () => renderVolatility(products, events, openGroup),
   };
   for (const id of ['logShop', 'logGroup', 'logDir']) document.getElementById(id).addEventListener('change', renders.dziennik);
-  document.getElementById('reactWindow').addEventListener('change', renders.reakcje);
+  for (const id of ['reactWindow', 'reactRange']) document.getElementById(id).addEventListener('change', renders.reakcje);
   for (const id of ['volShop', 'volSort']) document.getElementById(id).addEventListener('change', renders.zmiennosc);
 
   const buttons = [...document.querySelectorAll('.subtab')];
