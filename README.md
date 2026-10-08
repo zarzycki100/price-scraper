@@ -92,8 +92,15 @@ GitHub Pages.
 
 Ukryta strona `docs/dodaj.html` (na GitHub Pages: `https://<login>.github.io/<repo>/dodaj.html`,
 bez linku z monitora cen) działa w trzech krokach. Kolejką są zgłoszenia (issues) na GitHubie
-z etykietą `dodaj-produkt` – formularz otwiera gotowe zgłoszenie, wystarczy kliknąć „Create”;
-nie trzeba trzymać żadnego tokenu w przeglądarce.
+z etykietą `dodaj-produkt`, które strona tworzy sama przez API GitHuba – użytkownik nie
+przechodzi na GitHuba.
+
+Do zapisu strona potrzebuje jednorazowo tokenu: fine-grained token GitHuba z dostępem tylko do
+tego repozytorium i jednym uprawnieniem **Issues: Read and write** (link do formularza tokenu
+z wypełnioną nazwą jest na stronie). Token zapisuje się wyłącznie w `localStorage` przeglądarki
+i jest wysyłany tylko do `api.github.com`. Przejęty token pozwoliłby jedynie tworzyć zgłoszenia
+(zlecać wyszukiwania i dodawać produkty z obsługiwanych sklepów). Wygasły token strona wykrywa
+i prosi o nowy; listę wyszukiwań da się czytać także bez niego.
 
 1. **Szukaj** – link do produktu w obsługiwanym sklepie albo nazwa. Skrypt `add_products.py`
    (cron co 5 min: `cron_scrape.sh zgloszenia`, oraz przed każdym pobraniem cen):
@@ -112,12 +119,11 @@ nie trzeba trzymać żadnego tokenu w przeglądarce.
    Nazwę na stronie można zmienić albo wybrać istniejącą, żeby dołączyć oferty do produktu.
 3. **Dodaj do śledzenia** – tworzy zgłoszenie-potwierdzenie z wybranymi linkami; skrypt
    dopisuje je do `products.csv`, komentuje i zamyka oba zgłoszenia. Ceny pojawiają się
-   po najbliższym przebiegu scrapera.
+   po najbliższym przebiegu scrapera. **Odrzuć wyniki** zamyka wyszukiwanie bez dodawania.
 
 Skrypt obsługuje **tylko zgłoszenia autora repozytorium** (repo jest publiczne, a zgłoszenie
 każe komputerowi otwierać strony i zmieniać `products.csv`) i przyjmuje tylko linki
-o wzorcu strony produktu w obsługiwanym sklepie. Wyszukiwanie odrzucone na GitHubie
-(zamknięte zgłoszenie) po prostu znika z listy do potwierdzenia.
+o wzorcu strony produktu w obsługiwanym sklepie.
 
 Ręcznie, bez GitHuba:
 ```
@@ -144,7 +150,7 @@ products.csv                   - produkty do monitorowania (nazwa + URL w sklepi
 requirements.txt               - zależności Pythona
 data/prices.csv                - historia cen (tworzona automatycznie)
 docs/index.html                - strona z wykresem (Chart.js) dla GitHub Pages
-docs/dodaj.html                - ukryty formularz dodawania produktu (tworzy zgłoszenie na GitHubie)
+docs/dodaj.html                - ukryty formularz dodawania produktu (zgłoszenia przez API GitHuba)
 scripts/cron_scrape.sh         - uruchamianie z lokalnego crona (co 30 min)
 .github/workflows/scrape.yml   - ręczne uruchomienie w GitHub Actions
 ```

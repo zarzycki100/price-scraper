@@ -39,11 +39,11 @@
   .card { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 1.2rem; margin-bottom: 1.5rem; }
   .card-head { display: flex; justify-content: space-between; align-items: baseline; gap: 1rem; margin-bottom: .75rem; }
   label.field { display: block; font-size: .9rem; color: var(--text-2); }
-  input[type=text] {
+  input[type=text], input[type=password] {
     display: block; width: 100%; margin-top: .35rem; font: inherit; font-size: .95rem; padding: .55rem .6rem;
     border-radius: 6px; border: 1px solid var(--border); background: var(--surface); color: var(--text);
   }
-  input[type=text]:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+  input[type=text]:focus, input[type=password]:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
   .row { display: flex; gap: .6rem; align-items: flex-end; }
   .row label.field { flex: 1; min-width: 0; }
   @media (max-width: 600px) { .row { flex-direction: column; align-items: stretch; } }
@@ -56,6 +56,11 @@
   .error { color: var(--err); font-size: .9rem; margin: .5rem 0 0; }
   .note { color: var(--text-3); font-size: .82rem; margin: .75rem 0 0; }
   .muted { color: var(--text-3); }
+  .ok-text { color: var(--ok); font-size: .9rem; margin: .5rem 0 0; }
+  .account { font-size: .85rem; color: var(--text-3); margin: -.75rem 0 1.25rem; }
+  ol.steps { margin: .5rem 0 1rem; padding-left: 1.2rem; font-size: .9rem; color: var(--text-2); }
+  ol.steps li { margin-bottom: .35rem; }
+  .actions { display: flex; gap: 1rem; align-items: center; flex-wrap: wrap; }
 
   /* lista wyszukiwan */
   .req { border-top: 1px solid var(--border); padding: .8rem 0; }
@@ -90,7 +95,27 @@
   System wyszuka go we wszystkich sklepach i pokaże wyniki do sprawdzenia – do śledzenia trafi tylko to,
   co potwierdzisz. <a href="./">← wróć do monitora cen</a></p>
 
-<form class="card" id="form" novalidate>
+<section class="card" id="connect" hidden>
+  <h2>Połącz z GitHubem – jednorazowo</h2>
+  <p class="note" style="margin-top:.5rem">Zgłoszenia trafiają do kolejki w Twoim repozytorium na GitHubie, skąd odbiera je
+    komputer ze scraperem. Strona tworzy je sama, ale potrzebuje do tego tokenu. Token zapisuje się tylko w tej
+    przeglądarce i jest wysyłany wyłącznie do API GitHuba.</p>
+  <ol class="steps">
+    <li><a id="tokenLink" target="_blank" rel="noopener">Utwórz token</a> (fine-grained) – w <i>Repository access</i>
+      wybierz <i>Only select repositories</i> → <b id="repoName"></b>, w <i>Permissions</i> ustaw tylko
+      <b>Issues: Read and write</b>.</li>
+    <li>Skopiuj wygenerowany token i wklej go poniżej.</li>
+  </ol>
+  <div class="row">
+    <label class="field">Token
+      <input type="password" id="token" autocomplete="off" placeholder="github_pat_…">
+    </label>
+    <button class="primary" id="connectBtn" type="button">Połącz</button>
+  </div>
+  <p class="error" id="connectError" hidden></p>
+</section>
+
+<form class="card" id="form" novalidate hidden>
   <div class="row">
     <label class="field">Link do produktu albo nazwa
       <input type="text" id="query" autocomplete="off" required
@@ -99,10 +124,12 @@
     <button class="primary" type="submit">Szukaj w sklepach</button>
   </div>
   <p class="error" id="error" hidden></p>
-  <p class="note">Otworzy się GitHub z gotowym zgłoszeniem – kliknij „Create”. Wyszukiwanie zrobi komputer ze
-    scraperem w ciągu kilku minut (sprawdza zgłoszenia co 5 min, dłużej, gdy akurat pobiera ceny);
-    wyniki pojawią się poniżej.</p>
+  <p class="ok-text" id="sent" hidden></p>
+  <p class="note">Wyszukiwanie zrobi komputer ze scraperem w ciągu kilku minut (sprawdza zgłoszenia co 5 min,
+    dłużej, gdy akurat pobiera ceny); wyniki pojawią się poniżej.</p>
 </form>
+<p class="account" id="account" hidden>Połączono z GitHubem jako <b id="login"></b> ·
+  <button class="linkbtn" id="disconnect" type="button">rozłącz</button></p>
 
 <section class="card">
   <div class="card-head">
@@ -122,7 +149,9 @@ const SEARCH_MARKER = '<!-- price-scraper:dodaj -->';
 const CONFIRM_MARKER = '<!-- price-scraper:potwierdz -->';
 const RESULTS_RE = /<!-- price-scraper:wyniki ([\s\S]*?) -->/;
 const SHOP_HOSTS = ['www.euro.com.pl', 'www.mediaexpert.pl', 'mediamarkt.pl'];
-const POLL_MS = 90e3; // publiczne API GitHuba: 60 zapytan/h bez logowania
+const TOKEN_KEY = 'price-scraper-gh-token';
+// bez tokenu publiczne API GitHuba pozwala na 60 zapytan/h, z tokenem na 5000/h
+const pollMs = () => token() ? 20e3 : 90e3;
 
 // login/repo z adresu GitHub Pages (login.github.io/repo/), lokalnie - repo domyslne
 function repoSlug() {
@@ -144,16 +173,91 @@ function el(tag, props = {}, ...children) {
 }
 const field = (body, key) => ((body || '').match(new RegExp(`^${key}:[ \\t]*(.*)$`, 'm')) || [])[1]?.trim() || '';
 
-function openIssue(title, body) {
-  const url = `https://github.com/${REPO}/issues/new?` + new URLSearchParams({ title, body, labels: LABEL });
-  window.open(url, '_blank', 'noopener');
+// ---------- token GitHuba (tylko w localStorage tej przegladarki) ----------
+
+function token() {
+  try { return localStorage.getItem(TOKEN_KEY) || ''; } catch (e) { return ''; }
 }
+function setToken(value) {
+  try { value ? localStorage.setItem(TOKEN_KEY, value) : localStorage.removeItem(TOKEN_KEY); } catch (e) { /* tryb prywatny */ }
+}
+
+async function api(path, { method = 'GET', body } = {}) {
+  const headers = { Accept: 'application/vnd.github+json' };
+  if (token()) headers.Authorization = 'Bearer ' + token();
+  if (body) headers['Content-Type'] = 'application/json';
+  const res = await fetch(path.startsWith('http') ? path : API + path, { method, headers, body: body && JSON.stringify(body) });
+  if (res.status === 401 && token()) {
+    // token wygasl albo zostal usuniety - odczyt dziala tez bez niego, zapis wymaga nowego tokenu
+    setToken('');
+    showConnected(null);
+    const err = document.getElementById('connectError');
+    err.textContent = 'Token jest nieprawidłowy albo wygasł – utwórz nowy i połącz ponownie.';
+    err.hidden = false;
+    if (method === 'GET') return api(path);
+    throw new Error('token jest nieprawidłowy albo wygasł');
+  }
+  if (!res.ok) {
+    if (res.status === 403 && !token()) throw new Error('limit zapytań GitHuba – spróbuj za kilka minut');
+    if (res.status === 403 || res.status === 404) throw new Error('token nie ma uprawnienia „Issues: Read and write” do tego repozytorium');
+    throw new Error('HTTP ' + res.status);
+  }
+  return res.json();
+}
+
+// zgloszenie w kolejce - tworzy je strona, bez przechodzenia na GitHuba
+const createIssue = (title, body) => api('/issues', { method: 'POST', body: { title, body, labels: [LABEL] } });
+const closeIssue = n => api(`/issues/${n}`, { method: 'PATCH', body: { state: 'closed', state_reason: 'not_planned' } });
+
+function showConnected(login) {
+  document.getElementById('connect').hidden = !!login;
+  document.getElementById('form').hidden = !login;
+  document.getElementById('account').hidden = !login;
+  document.getElementById('login').textContent = login || '';
+}
+
+async function connect() {
+  const err = document.getElementById('connectError');
+  const value = document.getElementById('token').value.trim();
+  err.hidden = true;
+  if (!value) return;
+  setToken(value);
+  try {
+    const user = await api('https://api.github.com/user');
+    await api('/issues?per_page=1'); // dostep do repozytorium
+    if (user.login.toLowerCase() !== REPO.split('/')[0].toLowerCase()) {
+      throw new Error(`zalogowano jako ${user.login}, a skrypt przyjmuje tylko zgłoszenia właściciela repozytorium`);
+    }
+    document.getElementById('token').value = '';
+    showConnected(user.login);
+    load(true); // przyciski w wynikach zaleza od tokenu
+  } catch (e) {
+    setToken('');
+    err.textContent = 'Nie udało się połączyć: ' + e.message;
+    err.hidden = false;
+  }
+}
+
+document.getElementById('connectBtn').addEventListener('click', connect);
+document.getElementById('token').addEventListener('keydown', e => { if (e.key === 'Enter') connect(); });
+document.getElementById('disconnect').addEventListener('click', () => { setToken(''); showConnected(null); load(true); });
+document.getElementById('repoName').textContent = REPO.split('/')[1];
+document.getElementById('tokenLink').href = 'https://github.com/settings/personal-access-tokens/new?' + new URLSearchParams({
+  name: 'Monitor cen – dodawanie produktów',
+  description: 'Tworzenie zgłoszeń z formularza dodaj.html',
+  target_name: REPO.split('/')[0],
+  expires_in: '365',
+  issues: 'write',
+});
 
 // ---------- krok 1: wyszukanie ----------
 
-document.getElementById('form').addEventListener('submit', e => {
+document.getElementById('form').addEventListener('submit', async e => {
   e.preventDefault();
   const error = document.getElementById('error');
+  const sent = document.getElementById('sent');
+  const button = e.target.querySelector('button[type=submit]');
+  sent.hidden = true;
   const query = oneLine(document.getElementById('query').value);
   let problem = '';
   if (!query) problem = 'Wpisz link albo nazwę produktu.';
@@ -163,25 +267,30 @@ document.getElementById('form').addEventListener('submit', e => {
   error.textContent = problem;
   error.hidden = !problem;
   if (problem) return;
-  openIssue('Szukaj produktu: ' + query.slice(0, 90), [
-    SEARCH_MARKER,
-    'zapytanie: ' + query,
-    '',
-    '_Wyszukanie z formularza dodawania produktu – wyniki dopisze skrypt add_products.py._',
-  ].join('\n'));
-  setTimeout(load, 30e3); // zgloszenie pojawi sie na liscie po utworzeniu na GitHubie
+  button.disabled = true;
+  try {
+    await createIssue('Szukaj produktu: ' + query.slice(0, 90), [
+      SEARCH_MARKER,
+      'zapytanie: ' + query,
+      '',
+      '_Wyszukanie z formularza dodawania produktu – wyniki dopisze skrypt add_products.py._',
+    ].join('\n'));
+    document.getElementById('query').value = '';
+    sent.textContent = 'Wysłano – wyszukiwanie ruszy przy najbliższym sprawdzeniu zgłoszeń.';
+    sent.hidden = false;
+    load();
+  } catch (err) {
+    error.textContent = 'Nie udało się wysłać: ' + err.message;
+    error.hidden = false;
+  } finally {
+    button.disabled = false;
+  }
 });
 
 // ---------- krok 2: wyniki i potwierdzenie ----------
 
 const resultsCache = new Map(); // numer zgloszenia -> dane wynikow
 let tracked = new Set();
-
-async function api(path) {
-  const res = await fetch(API + path, { headers: { Accept: 'application/vnd.github+json' } });
-  if (!res.ok) throw new Error(res.status === 403 ? 'limit zapytań GitHuba – spróbuj za kilka minut' : 'HTTP ' + res.status);
-  return res.json();
-}
 
 async function resultsOf(issue) {
   if (!resultsCache.has(issue.number)) {
@@ -243,27 +352,47 @@ function renderResults(issue, data) {
 
   const nameInput = el('input', { type: 'text', value: data.name, maxLength: 120 });
   nameInput.setAttribute('list', 'existing');
-  const add = el('button', { className: 'primary', type: 'button', textContent: 'Dodaj do śledzenia' });
+  const add = el('button', { className: 'primary', type: 'button', textContent: 'Dodaj do śledzenia', disabled: !token() });
+  const reject = el('button', { className: 'linkbtn', type: 'button', textContent: 'Odrzuć wyniki', disabled: !token() });
   const err = el('p', { className: 'error', hidden: true });
-  add.addEventListener('click', () => {
+  add.addEventListener('click', async () => {
     const urls = [...box.querySelectorAll('input[type=radio]:checked')].map(r => r.value).filter(Boolean);
     const name = oneLine(nameInput.value);
     err.textContent = !urls.length ? 'Wybierz co najmniej jedną ofertę.' : !name ? 'Podaj nazwę produktu.' : '';
     err.hidden = !err.textContent;
     if (err.textContent) return;
-    openIssue('Dodaj produkt: ' + name.slice(0, 90), [
-      CONFIRM_MARKER,
-      'zgloszenie: #' + issue.number,
-      'nazwa: ' + name,
-      ...urls.map(u => 'url: ' + u),
-      '',
-      `_Potwierdzenie wyników z #${issue.number} – linki doda skrypt add_products.py._`,
-    ].join('\n'));
-    setTimeout(load, 30e3);
+    add.disabled = reject.disabled = true;
+    try {
+      await createIssue('Dodaj produkt: ' + name.slice(0, 90), [
+        CONFIRM_MARKER,
+        'zgloszenie: #' + issue.number,
+        'nazwa: ' + name,
+        ...urls.map(u => 'url: ' + u),
+        '',
+        `_Potwierdzenie wyników z #${issue.number} – linki doda skrypt add_products.py._`,
+      ].join('\n'));
+      load(true);
+    } catch (e) {
+      err.textContent = 'Nie udało się wysłać: ' + e.message;
+      err.hidden = false;
+      add.disabled = reject.disabled = false;
+    }
+  });
+  reject.addEventListener('click', async () => {
+    add.disabled = reject.disabled = true;
+    try {
+      await closeIssue(issue.number);
+      load(true);
+    } catch (e) {
+      err.textContent = 'Nie udało się odrzucić: ' + e.message;
+      err.hidden = false;
+      add.disabled = reject.disabled = false;
+    }
   });
   box.append(el('div', { className: 'confirm' },
     el('label', { className: 'field' }, 'Nazwa na stronie (wybierz istniejącą, żeby dołączyć oferty do produktu)', nameInput),
-    el('div', { className: 'row' }, add, el('span', { className: 'note', textContent: 'Otworzy się GitHub z potwierdzeniem – kliknij „Create”.' })),
+    el('div', { className: 'row actions' }, add, reject,
+      token() ? null : el('span', { className: 'note', textContent: 'Połącz z GitHubem (u góry), żeby dodać.' })),
     err));
   return box;
 }
@@ -290,7 +419,7 @@ async function renderRequest(issue, confirmFor) {
 }
 
 let pollTimer;
-async function load() {
+async function load(force = false) {
   clearTimeout(pollTimer);
   const list = document.getElementById('requests');
   try {
@@ -300,7 +429,8 @@ async function load() {
       .filter(i => i.state === 'open' && (i.body || '').includes(CONFIRM_MARKER))
       .map(i => Number(field(i.body, 'zgloszenie').replace('#', ''))));
     // nie przerysowujemy wynikow, w ktorych uzytkownik wlasnie cos wybiera
-    const keep = new Map([...list.querySelectorAll('.req')].filter(n => n.querySelector('.results')).map(n => [n.id, n]));
+    const keep = force ? new Map()
+      : new Map([...list.querySelectorAll('.req')].filter(n => n.querySelector('.results')).map(n => [n.id, n]));
     const nodes = [];
     for (const issue of searches) {
       const id = 'req-' + issue.number;
@@ -310,7 +440,7 @@ async function load() {
     list.replaceChildren(...(nodes.length ? nodes : [el('p', { className: 'muted', textContent: 'Brak wyszukiwań.' })]));
     if (location.hash) document.getElementById('req-' + location.hash.slice(1))?.scrollIntoView({ block: 'start' });
     // odswiezamy sami tylko wtedy, gdy na cos czekamy
-    if (searches.some(i => ['szukam…', 'dodawanie…'].includes(statusOf(i, confirmFor)[1]))) pollTimer = setTimeout(load, POLL_MS);
+    if (searches.some(i => ['szukam…', 'dodawanie…'].includes(statusOf(i, confirmFor)[1]))) pollTimer = setTimeout(load, pollMs());
   } catch (e) {
     list.replaceChildren(el('p', { className: 'error', textContent: 'Nie udało się wczytać wyszukiwań: ' + e.message }));
   }
@@ -338,7 +468,17 @@ async function loadProducts() {
   }
 }
 
-loadProducts().then(load);
+// start: sprawdzenie zapisanego tokenu
+(async () => {
+  if (token()) {
+    try { showConnected((await api('https://api.github.com/user')).login); }
+    catch (e) { showConnected(null); }
+  } else {
+    showConnected(null);
+  }
+  await loadProducts();
+  load();
+})();
 </script>
 </body>
 </html>
