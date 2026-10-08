@@ -6,9 +6,18 @@
 # niedokonczonych zmian z kopii roboczej. Klon uzywa HTTPS + tokenu z `gh`
 # (klucz SSH z haslem nie zadziala z crona, bo nie ma tam ssh-agenta).
 #
-# Wpis w crontab (crontab -e):
+# Tryby (argument):
+#   ceny        (domyslny) zgloszenia dodania produktow + pobranie cen
+#   zgloszenia  tylko zgloszenia z formularza docs/dodaj.html (add_products.py) -
+#               czesto, zeby wyniki wyszukiwania i dodanie produktu nie czekaly
+#               na przebieg cen; bez zgloszen nie uruchamia przegladarki i nic nie loguje
+#
+# Wpisy w crontab (crontab -e):
 #   7,37 * * * * /sciezka/do/repo/scripts/cron_scrape.sh
+#   */5 * * * *  /sciezka/do/repo/scripts/cron_scrape.sh zgloszenia
 set -euo pipefail
+
+MODE="${1:-ceny}"
 
 REPO_URL="${REPO_URL:-https://github.com/zarzycki100/price-scraper.git}"
 CLONE_DIR="${CLONE_DIR:-$HOME/.local/share/price-scraper-cron}"
@@ -25,16 +34,18 @@ exec >>"$LOG_FILE" 2>&1
 # nie dopuszczamy do dwoch przebiegow naraz (np. gdy poprzedni sie zawiesil)
 exec 9>"$LOG_DIR/cron.lock"
 if ! flock -n 9; then
-  echo "$(date -Is) poprzedni przebieg jeszcze trwa - pomijam"
+  # zgloszenia sprawdzamy co 5 min - nie zasmiecamy logu, gdy trwa przebieg cen
+  [ "$MODE" = ceny ] && echo "$(date -Is) poprzedni przebieg jeszcze trwa - pomijam"
   exit 0
 fi
 
-# losowe opoznienie startu (0-2 min) - zeby requesty nie przychodzily zawsze
-# o tej samej minucie, co jest typowym sladem crona
-START_JITTER_MAX="${START_JITTER_MAX:-120}"
-sleep $((RANDOM % (START_JITTER_MAX + 1)))
-
-echo "===== $(date -Is) ====="
+if [ "$MODE" = ceny ]; then
+  # losowe opoznienie startu (0-2 min) - zeby requesty nie przychodzily zawsze
+  # o tej samej minucie, co jest typowym sladem crona
+  START_JITTER_MAX="${START_JITTER_MAX:-120}"
+  sleep $((RANDOM % (START_JITTER_MAX + 1)))
+  echo "===== $(date -Is) ====="
+fi
 
 if [ ! -d "$CLONE_DIR/.git" ]; then
   git clone --quiet "$REPO_URL" "$CLONE_DIR"
@@ -48,11 +59,18 @@ git config user.email "$(git -C "$CLONE_DIR" config --global user.email || echo 
 git fetch --quiet origin main
 git reset --quiet --hard origin/main
 
-# zgloszenia "dodaj-produkt" z GitHuba (strona docs/dodaj.html) - przed scraperem,
-# zeby nowe produkty mialy ceny juz w tym przebiegu; blad nie blokuje scrapowania
-python3 add_products.py || echo "add_products.py zakonczyl sie bledem"
-
-python3 scraper.py || status=$?
+if [ "$MODE" = zgloszenia ]; then
+  out=$(python3 add_products.py 2>&1) || out="$out
+add_products.py zakonczyl sie bledem"
+  [ -z "$out" ] && exit 0  # brak zgloszen
+  echo "===== $(date -Is) (zgloszenia) ====="
+  echo "$out"
+else
+  # zgloszenia "dodaj-produkt" przed scraperem, zeby dodane produkty mialy ceny
+  # juz w tym przebiegu; blad nie blokuje scrapowania
+  python3 add_products.py || echo "add_products.py zakonczyl sie bledem"
+  python3 scraper.py || status=$?
+fi
 
 git add data/prices.csv products.csv
 if git diff --cached --quiet; then

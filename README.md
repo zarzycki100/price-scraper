@@ -46,6 +46,7 @@ GitHub Pages.
    crontab -e
    # dopisz:
    7,37 * * * * /sciezka/do/repo/scripts/cron_scrape.sh
+   */5 * * * *  /sciezka/do/repo/scripts/cron_scrape.sh zgloszenia   # formularz dodawania produktów
    ```
    Skrypt pracuje na osobnym klonie repo (`~/.local/share/price-scraper-cron`),
    więc nie rusza Twojej kopii roboczej. Dopisuje wiersze do
@@ -90,34 +91,38 @@ GitHub Pages.
 ## Dodawanie produktów z wyszukiwaniem w innych sklepach
 
 Ukryta strona `docs/dodaj.html` (na GitHub Pages: `https://<login>.github.io/<repo>/dodaj.html`,
-bez linku z monitora cen) przyjmuje link do produktu w obsługiwanym sklepie albo jego nazwę.
-Formularz otwiera na GitHubie gotowe zgłoszenie (issue) z etykietą `dodaj-produkt` – wystarczy
-kliknąć „Create”. Nie trzeba trzymać żadnego tokenu w przeglądarce.
+bez linku z monitora cen) działa w trzech krokach. Kolejką są zgłoszenia (issues) na GitHubie
+z etykietą `dodaj-produkt` – formularz otwiera gotowe zgłoszenie, wystarczy kliknąć „Create”;
+nie trzeba trzymać żadnego tokenu w przeglądarce.
 
-Przy najbliższym przebiegu crona `add_products.py` (uruchamiany przed scraperem):
+1. **Szukaj** – link do produktu w obsługiwanym sklepie albo nazwa. Skrypt `add_products.py`
+   (cron co 5 min: `cron_scrape.sh zgloszenia`, oraz przed każdym pobraniem cen):
+   - ustala produkt źródłowy: ze wskazanej strony albo wyszukując nazwę w sklepach
+     (najlepiej pasujący wynik z kodem EAN),
+   - w pozostałych sklepach próbuje kolejnych zapytań – EAN, marka + seria + kod modelu,
+     sam kod, początek nazwy – a na koniec DuckDuckGo `site:sklep`; otwiera najlepiej
+     pasujących kandydatów (z limitem stron na sklep) i odczytuje z nich EAN, cenę i dostępność,
+   - gdy w którymś sklepie nic nie znalazł, szuka jeszcze raz nazwą z potwierdzonego
+     dopasowania (bywa w niej kod modelu, którego brakuje w nazwie źródłowej),
+   - **niczego nie dodaje** – dopisuje do zgłoszenia komentarz z wynikami (tabela dla
+     człowieka + JSON w ukrytym komentarzu HTML dla strony) i etykietę `wyniki`.
+2. **Sprawdź** – strona pokazuje wyniki: w każdym sklepie oferty z linkiem, ceną i EAN-em,
+   oznaczone „ten sam EAN” (zaznaczone domyślnie) albo „podobny – sprawdź” (do wyboru ręcznie,
+   np. inny kolor albo kabel 1 m zamiast 10 m), oraz opcję „nie dodawaj z tego sklepu”.
+   Nazwę na stronie można zmienić albo wybrać istniejącą, żeby dołączyć oferty do produktu.
+3. **Dodaj do śledzenia** – tworzy zgłoszenie-potwierdzenie z wybranymi linkami; skrypt
+   dopisuje je do `products.csv`, komentuje i zamyka oba zgłoszenia. Ceny pojawiają się
+   po najbliższym przebiegu scrapera.
 
-1. czyta otwarte zgłoszenia z etykietą `dodaj-produkt` – **tylko autora repozytorium**
-   (repo jest publiczne, a zgłoszenie każe komputerowi otwierać strony),
-2. ustala produkt źródłowy: ze wskazanej strony albo wyszukując nazwę w sklepach
-   (najlepiej pasujący wynik z kodem EAN),
-3. w pozostałych sklepach próbuje kolejnych zapytań – EAN, marka + seria + kod modelu,
-   sam kod, początek nazwy – a na koniec DuckDuckGo `site:sklep`; otwiera najlepiej
-   pasujących kandydatów (z limitem stron na sklep),
-4. dodaje do `products.csv` **tylko oferty ze zgodnym EAN** (`gtin13` z JSON-LD strony
-   produktu – jest we wszystkich trzech sklepach); podobne bez zgodnego EAN tylko wypisuje
-   (np. kabel 1 m zamiast 10 m ma prawie identyczną nazwę),
-5. gdy w którymś sklepie nic nie znalazł, szuka jeszcze raz nazwą z potwierdzonego
-   dopasowania (bywa w niej kod modelu, którego brakuje w nazwie źródłowej),
-6. komentuje zgłoszenie tabelą wyników i je zamyka („dodano” albo „nie dodano”).
+Skrypt obsługuje **tylko zgłoszenia autora repozytorium** (repo jest publiczne, a zgłoszenie
+każe komputerowi otwierać strony i zmieniać `products.csv`) i przyjmuje tylko linki
+o wzorcu strony produktu w obsługiwanym sklepie. Wyszukiwanie odrzucone na GitHubie
+(zamknięte zgłoszenie) po prostu znika z listy do potwierdzenia.
 
-Nazwa produktu na stronie: z formularza albo – domyślnie – ze sklepu źródłowego. Podanie
-nazwy istniejącego produktu dołącza do niego oferty. Odznaczenie wyszukiwania dodaje tylko
-podany link (np. ofertę, której skrypt nie potwierdził).
-
-Ręczny test bez GitHuba i bez zapisu:
+Ręcznie, bez GitHuba:
 ```
-python3 add_products.py --query "https://www.euro.com.pl/..." --dry-run
-python3 add_products.py --query "Sony WH-1000XM5 czarne" --dry-run
+python3 add_products.py --query "https://www.euro.com.pl/..."            # tylko wyniki
+python3 add_products.py --query "Sony WH-1000XM5" --add --name "Sony WH-1000XM5"
 ```
 
 ## Dodawanie kolejnego sklepu

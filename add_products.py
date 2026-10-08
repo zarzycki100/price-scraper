@@ -1,20 +1,25 @@
 #!/usr/bin/env python3
 """
-Dodawanie produktow do products.csv z wyszukiwaniem tego samego produktu w innych sklepach.
+Dodawanie produktow do products.csv: wyszukiwanie produktu we wszystkich sklepach,
+potwierdzenie przez uzytkownika i dopiero wtedy dodanie do sledzenia.
 
-Zgloszenia przychodza jako issues na GitHubie z etykieta "dodaj-produkt" (tworzy je
-ukryta strona docs/dodaj.html). Skrypt uruchamiany z crona przed scraperem:
-  1. czyta otwarte zgloszenia autora repozytorium (gh issue list),
-  2. ustala produkt zrodlowy - z linku do sklepu albo wyszukujac nazwe w sklepach,
-  3. w pozostalych sklepach szuka kandydatow (wyszukiwarka sklepu kilkoma zapytaniami,
-     na koniec DuckDuckGo "site:sklep") i otwiera najlepszych,
-  4. dodaje do products.csv oferty ze zgodnym EAN (gtin13 z JSON-LD strony produktu),
-     podobne bez zgodnego EAN tylko opisuje w raporcie,
-  5. komentuje i zamyka zgloszenie.
+Kolejka to issues na GitHubie z etykieta "dodaj-produkt" - tworzy je ukryta strona
+docs/dodaj.html. Skrypt uruchamiany z crona (co 5 min i przed scraperem) obsluguje
+tylko zgloszenia autora repozytorium:
 
-Reczne uruchomienie (test, bez GitHuba):
-  python3 add_products.py --query "https://www.euro.com.pl/..." --dry-run
-  python3 add_products.py --query "Hama 200925 10 m" --name "Kabel Hama 10 m"
+  wyszukanie (znacznik price-scraper:dodaj, bez etykiety "wyniki"):
+    1. produkt zrodlowy - z linku do sklepu albo wyszukujac nazwe w sklepach,
+    2. w pozostalych sklepach kandydaci z wyszukiwarki sklepu (kilka zapytan,
+       zapasowo DuckDuckGo "site:sklep"); najlepsi sa otwierani i porownywani po EAN,
+    3. komentarz z wynikami (tabela + JSON dla strony) i etykieta "wyniki";
+       nic nie jest jeszcze dodawane,
+  potwierdzenie (znacznik price-scraper:potwierdz, tworzy je strona po wyborze ofert):
+    4. dopisuje wybrane linki do products.csv pod podana nazwa,
+    5. komentuje i zamyka potwierdzenie oraz wyszukanie.
+
+Reczne uruchomienie (bez GitHuba):
+  python3 add_products.py --query "https://www.euro.com.pl/..."      # tylko wyniki
+  python3 add_products.py --query "Sony WH-1000XM5" --add --name "Sony WH-1000XM5"
 """
 
 import argparse
@@ -34,7 +39,10 @@ from bs4 import BeautifulSoup
 import scraper
 
 ISSUE_LABEL = "dodaj-produkt"
-ISSUE_MARKER = "<!-- price-scraper:dodaj -->"
+RESULTS_LABEL = "wyniki"
+SEARCH_MARKER = "<!-- price-scraper:dodaj -->"
+CONFIRM_MARKER = "<!-- price-scraper:potwierdz -->"
+RESULTS_MARKER = "price-scraper:wyniki"
 
 # Ile stron kandydatow najwyzej otwieramy w jednym sklepie (kazda to zapytanie do sklepu):
 # z wyszukiwarki sklepu i osobno z DuckDuckGo, zeby podobne produkty z wyszukiwarki
@@ -67,6 +75,9 @@ class Product:
     title: str
     ean: str | None
     brand: str | None
+    price: str | None = None
+    sale_price: str | None = None
+    availability: str | None = None
 
 
 @dataclass
@@ -184,7 +195,16 @@ class Searcher:
         self.warm_up(urlparse(url).hostname)
         html = self._goto(url)
         scraper.browse_a_bit(self.page)
-        return identify(html, url)
+        found = identify(html, url)
+        if found:
+            # cena i dostepnosc tym samym parserem co scraper - do pokazania w wynikach
+            try:
+                data = scraper.SHOPS[found.host][1](BeautifulSoup(html, "html.parser"), html)
+                found.price, found.sale_price = data.get("price"), data.get("sale_price")
+                found.availability = data.get("availability")
+            except Exception:  # noqa: BLE001 - brak ceny nie przeszkadza w dopasowaniu
+                pass
+        return found
 
     def search(self, host: str, query: str) -> list[tuple[str, str]]:
         """[(tytul, url)] z wyszukiwarki sklepu; przekierowanie prosto na produkt = jeden wynik."""
@@ -390,7 +410,7 @@ def load_product_rows() -> list[dict]:
         return list(csv.DictReader(f))
 
 
-def add_rows(name: str, urls: list[str], dry_run: bool) -> tuple[str, list[str]]:
+def add_rows(name: str, urls: list[str]) -> tuple[str, list[str]]:
     """Dopisuje URL-e pod nazwa produktu (istniejaca nazwa = dolaczenie do grupy). Zwraca (nazwa, dodane)."""
     rows = load_product_rows()
     existing_urls = {r["url"].strip() for r in rows}
@@ -399,7 +419,7 @@ def add_rows(name: str, urls: list[str], dry_run: bool) -> tuple[str, list[str]]
             name = r["product"].strip()
             break
     new = [u for u in dict.fromkeys(urls) if u not in existing_urls]
-    if new and not dry_run:
+    if new:
         text = scraper.PRODUCTS_FILE.read_text(encoding="utf-8")
         with scraper.PRODUCTS_FILE.open("a", newline="", encoding="utf-8") as f:
             if text and not text.endswith("\n"):
@@ -415,41 +435,69 @@ def default_name(source: Product) -> str:
     return title if len(title) <= 80 else title[:79].rstrip() + "…"
 
 
-# ---------------- raport ----------------
+def valid_product_url(url: str) -> bool:
+    host = urlparse(url).hostname
+    return host in PRODUCT_URL and bool(PRODUCT_URL[host].match(url))
 
-def report(query: str, source: Product | None, results: list[ShopResult], name: str | None, added: list[str],
-           error: str | None, dry_run: bool = False) -> str:
-    lines = ["### Wynik dodawania produktu" + (" (próba – nic nie zapisano)" if dry_run else ""), "", f"Zapytanie: `{query}`", ""]
-    if error:
-        lines += [f"❌ **Nie dodano:** {error}."]
-        return "\n".join(lines)
-    lines += [f"Produkt źródłowy: [{source.title}]({source.url}) — EAN: `{source.ean or 'brak'}`", "",
-              "| Sklep | Wynik | Oferta |", "|---|---|---|"]
+
+# ---------------- wyniki ----------------
+
+def offer_dict(p: Product, status: str, note: str = "") -> dict:
+    return {
+        "shop": shop_name(p.host), "url": p.url, "title": p.title, "ean": p.ean,
+        "price": p.price, "sale_price": p.sale_price, "availability": p.availability,
+        "status": status, "note": note,
+    }
+
+
+def results_data(query: str, source: Product, results: list[ShopResult]) -> dict:
+    """Wyniki dla strony dodawania: per sklep oferty do wyboru (dopasowane i podobne)."""
+    shops = []
     for r in results:
-        shop = shop_name(r.host)
-        if r.status == "source":
-            status = "✅ źródło" + (" (dodano)" if r.product.url in added else " (już było śledzone)")
-            lines.append(f"| {shop} | {status} | [{r.product.title}]({r.product.url}) |")
-        elif r.status == "match":
-            status = "✅ dodano" if r.product.url in added else "✅ znaleziono (już było śledzone)"
-            lines.append(f"| {shop} | {status} – {r.note} | [{r.product.title}]({r.product.url}) |")
-        elif r.status == "similar":
-            links = "<br>".join(f"[{p.title}]({p.url}) (EAN `{p.ean or 'brak'}`)" for p, _ in r.similar)
-            lines.append(f"| {shop} | ⚠️ tylko podobne, nie dodano{' – ' + r.note if r.note else ''} | {links} |")
-        elif r.status == "none":
-            lines.append(f"| {shop} | ❌ nie znaleziono{' – ' + r.note if r.note else ''} | |")
-        else:
-            lines.append(f"| {shop} | ⏸️ pominięto – {r.note} | |")
-    lines.append("")
-    if added:
-        lines.append(f"Dodano {len(added)} {'ofertę' if len(added) == 1 else 'oferty' if len(added) < 5 else 'ofert'} "
-                     f"do `products.csv` jako **{name}**. Ceny pojawią się po najbliższym przebiegu scrapera.")
-    else:
-        lines.append("Nic nowego nie dodano.")
-    if any(r.status == "similar" for r in results):
-        lines.append("\nPodobne oferty bez zgodnego EAN można dodać ręcznie: na stronie dodawania wklej link, "
-                     f"wpisz nazwę **{name or ''}** i odznacz wyszukiwanie w innych sklepach.")
+        offers = []
+        if r.status in ("source", "match"):
+            offers.append(offer_dict(r.product, r.status, r.note))
+        offers += [offer_dict(p, "similar") for p, _ in r.similar if not r.product or p.url != r.product.url]
+        shops.append({"shop": shop_name(r.host), "status": r.status, "note": r.note, "offers": offers})
+    return {
+        "query": query,
+        "name": default_name(source),
+        "source": offer_dict(source, "source"),
+        "tracked": [r["url"].strip() for r in load_product_rows()],
+        "shops": shops,
+    }
+
+
+def fmt_price(o: dict) -> str:
+    if o.get("sale_price"):
+        return f"{o['sale_price']} zł (zamiast {o['price']} zł)"
+    return f"{o['price']} zł" if o.get("price") else "–"
+
+
+def search_report(data: dict | None, error: str | None, confirm_url: str | None) -> str:
+    """Komentarz z wynikami: tabela dla czlowieka + JSON w ukrytym komentarzu HTML dla strony."""
+    lines = ["### Wyniki wyszukiwania", ""]
+    if error:
+        return "\n".join(lines + [f"❌ **Nie znaleziono produktu:** {error}."])
+    src = data["source"]
+    lines += [f"Produkt: **{src['title']}** — EAN `{src['ean'] or 'brak'}`", "",
+              "| Sklep | Wynik | Oferta | Cena |", "|---|---|---|---|"]
+    labels = {"source": "✅ źródło", "match": "✅ zgodny EAN", "similar": "⚠️ podobny – sprawdź"}
+    for shop in data["shops"]:
+        if not shop["offers"]:
+            reason = "⏸️ " + shop["note"] if shop["status"] in ("blocked", "skipped") else "❌ nie znaleziono"
+            lines.append(f"| {shop['shop']} | {reason} | | |")
+        for o in shop["offers"]:
+            lines.append(f"| {shop['shop']} | {labels[o['status']]} | [{o['title']}]({o['url']}) "
+                         f"(EAN `{o['ean'] or 'brak'}`) | {fmt_price(o)} |")
+    lines += ["", f"👉 **Potwierdź i dodaj do śledzenia:** {confirm_url}" if confirm_url else "",
+              "", f"<!-- {RESULTS_MARKER} {json_for_comment(data)} -->"]
     return "\n".join(lines)
+
+
+def json_for_comment(data: dict) -> str:
+    # "--" zamknieloby komentarz HTML - w JSON-ie moze wystapic tylko w tekstach, wiec - jest bezpieczne
+    return json.dumps(data, ensure_ascii=False).replace("--", "-\\u002d")
 
 
 # ---------------- zgloszenia z GitHuba ----------------
@@ -458,63 +506,119 @@ def gh(*args: str, input_text: str | None = None) -> str:
     return subprocess.run(["gh", *args], check=True, capture_output=True, text=True, input=input_text).stdout
 
 
-def parse_issue(body: str) -> dict | None:
-    if ISSUE_MARKER not in (body or ""):
-        return None
-    fields = {}
-    for key in ("zapytanie", "nazwa", "szukaj"):
-        m = re.search(rf"^{key}:[ \t]*(.*)$", body, re.M)
-        fields[key] = m.group(1).strip() if m else ""
-    if not fields["zapytanie"] or len(fields["zapytanie"]) > 500 or len(fields["nazwa"]) > 120:
-        return None
-    return fields
+def field_value(body: str, key: str) -> str:
+    m = re.search(rf"^{key}:[ \t]*(.*)$", body or "", re.M)
+    return m.group(1).strip() if m else ""
 
 
-def pending_issues() -> list[dict]:
-    owner = json.loads(gh("repo", "view", "--json", "owner"))["owner"]["login"]
+def repo_info() -> tuple[str, str]:
+    info = json.loads(gh("repo", "view", "--json", "owner,name"))
+    return info["owner"]["login"], info["name"]
+
+
+def pending_issues(owner: str) -> list[dict]:
     issues = json.loads(gh("issue", "list", "--label", ISSUE_LABEL, "--state", "open",
-                           "--json", "number,title,body,author", "--limit", "20"))
+                           "--json", "number,title,body,author,labels", "--limit", "30"))
     # tylko zgloszenia wlasciciela repozytorium - repo jest publiczne, a zgloszenie
-    # kaze tej maszynie otwierac strony
+    # kaze tej maszynie otwierac strony i zmieniac products.csv
     return [i for i in issues if i["author"]["login"] == owner]
 
 
-def handle(searcher: Searcher, query: str, name: str, search: bool, cooldowns: dict, dry_run: bool) -> tuple[str, bool]:
-    try:
-        source, results = process(searcher, query, search, cooldowns)
-    except (ValueError, scraper.Blocked) as exc:
-        return report(query, None, [], None, [], str(exc), dry_run), False
-    urls = [r.product.url for r in results if r.status in ("source", "match")]
-    final_name, added = add_rows(name or default_name(source), urls, dry_run)
-    return report(query, source, results, final_name, added, None, dry_run), bool(added)
+def handle_search(searcher: Searcher, issue: dict, cooldowns: dict, confirm_url: str) -> None:
+    query = field_value(issue["body"], "zapytanie")
+    print(f"Wyszukiwanie produktu: {query} (zgłoszenie #{issue['number']})")
+    if not query or len(query) > 500:
+        error, data = "puste albo za długie zapytanie", None
+    else:
+        try:
+            source, results = process(searcher, query, True, cooldowns)
+            error, data = None, results_data(query, source, results)
+        except (ValueError, scraper.Blocked) as exc:
+            error, data = str(exc), None
+    text = search_report(data, error, None if error else f"{confirm_url}#{issue['number']}")
+    print(text.split("<!--")[0])
+    gh("issue", "comment", str(issue["number"]), "--body-file", "-", input_text=text)
+    if error:
+        gh("issue", "close", str(issue["number"]), "--reason", "not planned")
+    else:
+        gh("issue", "edit", str(issue["number"]), "--add-label", RESULTS_LABEL)
+
+
+def handle_confirm(issue: dict, owner: str) -> bool:
+    """Dodaje wybrane linki; zwraca True, gdy products.csv sie zmienil."""
+    body = issue["body"]
+    ref = field_value(body, "zgloszenie").lstrip("#")
+    name = field_value(body, "nazwa")[:120]
+    urls = [u.strip() for u in re.findall(r"^url:[ \t]*(\S+)", body, re.M)]
+    bad = [u for u in urls if not valid_product_url(u)]
+    print(f"Potwierdzenie #{issue['number']} do zgłoszenia #{ref}: {len(urls)} linków")
+    if not name or not urls or bad:
+        reason = "brak nazwy" if not name else "brak linków" if not urls else "nieobsługiwane linki: " + ", ".join(bad)
+        gh("issue", "comment", str(issue["number"]), "--body", f"❌ Nie dodano: {reason}.")
+        gh("issue", "close", str(issue["number"]), "--reason", "not planned")
+        return False
+    final_name, added = add_rows(name, urls)
+    lines = [f"✅ Dodano do śledzenia jako **{final_name}**:" if added else f"Wszystkie linki były już śledzone (**{final_name}**)."]
+    lines += [f"- {u}" + ("" if u in added else " (już było śledzone)") for u in urls]
+    lines += ["", "Ceny pojawią się po najbliższym przebiegu scrapera (do ~30 min)."]
+    text = "\n".join(lines)
+    gh("issue", "comment", str(issue["number"]), "--body-file", "-", input_text=text)
+    gh("issue", "close", str(issue["number"]), "--reason", "completed")
+    if ref.isdigit():
+        original = json.loads(gh("issue", "view", ref, "--json", "author,state"))
+        if original["author"]["login"] == owner and original["state"] == "OPEN":
+            gh("issue", "comment", ref, "--body-file", "-", input_text=text + f"\n\nPotwierdzenie: #{issue['number']}")
+            gh("issue", "close", ref, "--reason", "completed")
+    return bool(added)
+
+
+def run_issues() -> None:
+    owner, repo = repo_info()
+    issues = pending_issues(owner)
+    labels = lambda i: {l["name"] for l in i["labels"]}
+    confirms = [i for i in issues if CONFIRM_MARKER in (i["body"] or "")]
+    searches = [i for i in issues if SEARCH_MARKER in (i["body"] or "") and RESULTS_LABEL not in labels(i)]
+    for issue in confirms:
+        handle_confirm(issue, owner)
+    if not searches:
+        return
+    confirm_url = f"https://{owner}.github.io/{repo}/dodaj.html"
+    state = scraper.load_state()
+    cooldowns = state.setdefault("cooldowns", {})
+    with scraper.open_browser(state) as page:
+        searcher = Searcher(page)
+        for issue in searches:
+            handle_search(searcher, issue, cooldowns, confirm_url)
+    scraper.save_state(state)
+
+
+def run_query(query: str, add: bool, name: str) -> None:
+    state = scraper.load_state()
+    with scraper.open_browser(state) as page:
+        try:
+            source, results = process(Searcher(page), query, True, state.setdefault("cooldowns", {}))
+        except (ValueError, scraper.Blocked) as exc:
+            print(search_report(None, str(exc), None))
+            return
+    scraper.save_state(state)
+    data = results_data(query, source, results)
+    print(search_report(data, None, None).split("<!--")[0])
+    if add:
+        urls = [r.product.url for r in results if r.status in ("source", "match")]
+        final_name, added = add_rows(name or data["name"], urls)
+        print(f"Dodano {len(added)} linków jako: {final_name}")
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--query", help="link do produktu albo nazwa (zamiast zgłoszeń z GitHuba)")
-    parser.add_argument("--name", default="", help="nazwa produktu w products.csv")
-    parser.add_argument("--no-search", action="store_true", help="nie szukaj w innych sklepach")
-    parser.add_argument("--dry-run", action="store_true", help="nie zapisuj products.csv i nie zmieniaj zgłoszeń")
+    parser.add_argument("--add", action="store_true", help="z --query: od razu dodaj oferty ze zgodnym EAN")
+    parser.add_argument("--name", default="", help="z --add: nazwa produktu w products.csv")
     args = parser.parse_args()
-
     if args.query:
-        jobs = [(None, {"zapytanie": args.query, "nazwa": args.name, "szukaj": "nie" if args.no_search else "tak"})]
+        run_query(args.query, args.add, args.name)
     else:
-        jobs = [(i["number"], f) for i in pending_issues() if (f := parse_issue(i["body"]))]
-        if not jobs:
-            return
-    state = scraper.load_state()
-    cooldowns = state.setdefault("cooldowns", {})
-    with scraper.open_browser(state) as page:
-        searcher = Searcher(page)
-        for number, f in jobs:
-            print(f"Dodawanie produktu: {f['zapytanie']}" + (f" (zgłoszenie #{number})" if number else ""))
-            text, added = handle(searcher, f["zapytanie"], f["nazwa"], f["szukaj"] != "nie", cooldowns, args.dry_run)
-            print(text)
-            if number and not args.dry_run:
-                gh("issue", "comment", str(number), "--body-file", "-", input_text=text)
-                gh("issue", "close", str(number), "--reason", "completed" if added else "not planned")
-    scraper.save_state(state)
+        run_issues()
 
 
 if __name__ == "__main__":
