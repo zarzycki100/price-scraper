@@ -87,21 +87,59 @@ GitHub Pages.
      wykresem (nazwy z linkami, cena teraz / najniższa / najwyższa,
      ukrywanie pojedynczych linii).
 
+## Dodawanie produktów z wyszukiwaniem w innych sklepach
+
+Ukryta strona `docs/dodaj.html` (na GitHub Pages: `https://<login>.github.io/<repo>/dodaj.html`,
+bez linku z monitora cen) przyjmuje link do produktu w obsługiwanym sklepie albo jego nazwę.
+Formularz otwiera na GitHubie gotowe zgłoszenie (issue) z etykietą `dodaj-produkt` – wystarczy
+kliknąć „Create”. Nie trzeba trzymać żadnego tokenu w przeglądarce.
+
+Przy najbliższym przebiegu crona `add_products.py` (uruchamiany przed scraperem):
+
+1. czyta otwarte zgłoszenia z etykietą `dodaj-produkt` – **tylko autora repozytorium**
+   (repo jest publiczne, a zgłoszenie każe komputerowi otwierać strony),
+2. ustala produkt źródłowy: ze wskazanej strony albo wyszukując nazwę w sklepach
+   (najlepiej pasujący wynik z kodem EAN),
+3. w pozostałych sklepach próbuje kolejnych zapytań – EAN, marka + seria + kod modelu,
+   sam kod, początek nazwy – a na koniec DuckDuckGo `site:sklep`; otwiera najlepiej
+   pasujących kandydatów (z limitem stron na sklep),
+4. dodaje do `products.csv` **tylko oferty ze zgodnym EAN** (`gtin13` z JSON-LD strony
+   produktu – jest we wszystkich trzech sklepach); podobne bez zgodnego EAN tylko wypisuje
+   (np. kabel 1 m zamiast 10 m ma prawie identyczną nazwę),
+5. gdy w którymś sklepie nic nie znalazł, szuka jeszcze raz nazwą z potwierdzonego
+   dopasowania (bywa w niej kod modelu, którego brakuje w nazwie źródłowej),
+6. komentuje zgłoszenie tabelą wyników i je zamyka („dodano” albo „nie dodano”).
+
+Nazwa produktu na stronie: z formularza albo – domyślnie – ze sklepu źródłowego. Podanie
+nazwy istniejącego produktu dołącza do niego oferty. Odznaczenie wyszukiwania dodaje tylko
+podany link (np. ofertę, której skrypt nie potwierdził).
+
+Ręczny test bez GitHuba i bez zapisu:
+```
+python3 add_products.py --query "https://www.euro.com.pl/..." --dry-run
+python3 add_products.py --query "Sony WH-1000XM5 czarne" --dry-run
+```
+
 ## Dodawanie kolejnego sklepu
 
 W `scraper.py` dopisz funkcję `parse_<sklep>(soup, html)` zwracającą
 `title`, `part_no`, `price`, `sale_price`, `availability` i dodaj domenę do
 słownika `SHOPS`. W `docs/index.html` dopisz domenę do `SHOP_BY_HOST`
 i nazwę sklepu do `SHOP_ORDER` (stały kolor i wzór linii sklepu na wykresie).
+Żeby sklep był przeszukiwany przy dodawaniu produktów, w `add_products.py` dopisz jego
+adres wyszukiwania (`SEARCH_URLS`), wzorzec adresu strony produktu (`PRODUCT_URL`)
+i odczyt wyników w `Searcher.search`, a w `docs/dodaj.html` domenę do `SHOP_HOSTS`.
 
 ## Struktura plików
 
 ```
 scraper.py                     - skrypt scrapujący (Playwright/Chrome + BeautifulSoup)
+add_products.py                - dodawanie produktów ze zgłoszeń i wyszukiwanie ich w innych sklepach
 products.csv                   - produkty do monitorowania (nazwa + URL w sklepie)
 requirements.txt               - zależności Pythona
 data/prices.csv                - historia cen (tworzona automatycznie)
 docs/index.html                - strona z wykresem (Chart.js) dla GitHub Pages
+docs/dodaj.html                - ukryty formularz dodawania produktu (tworzy zgłoszenie na GitHubie)
 scripts/cron_scrape.sh         - uruchamianie z lokalnego crona (co 30 min)
 .github/workflows/scrape.yml   - ręczne uruchomienie w GitHub Actions
 ```

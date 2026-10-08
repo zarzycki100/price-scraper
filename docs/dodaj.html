@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="robots" content="noindex, nofollow">
+<title>Dodaj produkt</title>
+<style>
+  :root {
+    color-scheme: light;
+    --bg: #f4f4f2; --surface: #fcfcfb; --border: #e2e1dc;
+    --text: #0b0b0b; --text-2: #52514e; --text-3: #7a7974;
+    --accent: #2a78d6; --ok: #1baf7a; --warn: #c98500; --err: #e34948; --chip-bg: #ecebe7;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      color-scheme: dark;
+      --bg: #121211; --surface: #1a1a19; --border: #2e2e2c;
+      --text: #ffffff; --text-2: #c3c2b7; --text-3: #93928a;
+      --accent: #3987e5; --ok: #199e70; --warn: #c98500; --err: #e66767; --chip-bg: #2e2e2c;
+    }
+  }
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+    --bg: #121211; --surface: #1a1a19; --border: #2e2e2c;
+    --text: #ffffff; --text-2: #c3c2b7; --text-3: #93928a;
+    --accent: #3987e5; --ok: #199e70; --warn: #c98500; --err: #e66767; --chip-bg: #2e2e2c;
+  }
+  * { box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    max-width: 720px; margin: 0 auto; padding: 2rem 16px;
+    background: var(--bg); color: var(--text);
+  }
+  h1 { font-size: 1.4rem; margin: 0 0 .25rem; }
+  h2 { font-size: 1.05rem; margin: 0 0 .75rem; }
+  a { color: var(--accent); }
+  .lead { color: var(--text-2); margin: 0 0 1.25rem; font-size: .95rem; }
+  .card { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 1.2rem; margin-bottom: 1.5rem; }
+  label.field { display: block; margin-bottom: 1rem; font-size: .9rem; color: var(--text-2); }
+  label.field span.hint { display: block; color: var(--text-3); font-size: .8rem; margin-top: .25rem; }
+  input[type=text] {
+    display: block; width: 100%; margin-top: .35rem; font: inherit; font-size: .95rem; padding: .55rem .6rem;
+    border-radius: 6px; border: 1px solid var(--border); background: var(--surface); color: var(--text);
+  }
+  input[type=text]:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+  .check { display: flex; gap: .5rem; align-items: flex-start; font-size: .9rem; color: var(--text-2); margin-bottom: 1rem; }
+  .check input { margin-top: .2rem; }
+  button.primary {
+    font: inherit; font-weight: 600; background: var(--accent); color: #fff; border: 0;
+    border-radius: 6px; padding: .6rem 1.1rem; cursor: pointer;
+  }
+  .error { color: var(--err); font-size: .9rem; margin: .5rem 0 0; }
+  .note { color: var(--text-3); font-size: .82rem; margin: 1rem 0 0; }
+  ul.requests { list-style: none; margin: 0; padding: 0; font-size: .9rem; }
+  ul.requests li { padding: .55rem 0; border-top: 1px solid var(--border); display: flex; gap: .75rem; align-items: baseline; }
+  ul.requests li:first-child { border-top: 0; }
+  .badge { flex: none; font-size: .72rem; font-weight: 600; border-radius: 999px; padding: .1rem .55rem; background: var(--chip-bg); color: var(--text-2); }
+  .badge.ok { color: var(--ok); } .badge.wait { color: var(--warn); } .badge.no { color: var(--err); }
+  .req-title { overflow-wrap: anywhere; }
+  .muted { color: var(--text-3); }
+</style>
+</head>
+<body>
+
+<h1>Dodaj produkt</h1>
+<p class="lead">Wklej link do produktu w RTV Euro AGD, Media Expert lub MediaMarkt albo wpisz jego nazwę.
+  Skrypt znajdzie ten sam produkt w pozostałych sklepach (po kodzie EAN) i doda go do śledzenia.
+  <a href="./">← wróć do monitora cen</a></p>
+
+<form class="card" id="form" novalidate>
+  <label class="field">Link do produktu albo nazwa
+    <input type="text" id="query" autocomplete="off" required
+      placeholder="https://www.euro.com.pl/... albo np. Sony WH-1000XM5 czarne">
+  </label>
+  <label class="field">Nazwa na stronie <span class="muted">(opcjonalnie)</span>
+    <input type="text" id="name" list="existing" autocomplete="off" maxlength="120"
+      placeholder="domyślnie – nazwa ze sklepu">
+    <datalist id="existing"></datalist>
+    <span class="hint">Wybierz nazwę istniejącego produktu, żeby dołączyć do niego ofertę z kolejnego sklepu.</span>
+  </label>
+  <label class="check">
+    <input type="checkbox" id="search" checked>
+    <span>Szukaj tego produktu w pozostałych sklepach<br>
+      <span class="muted">Odznacz, żeby dodać tylko podany link (np. ofertę, której skrypt nie potwierdził).</span></span>
+  </label>
+  <button class="primary" type="submit">Dodaj</button>
+  <p class="error" id="error" hidden></p>
+  <p class="note">Otworzy się GitHub z gotowym zgłoszeniem – kliknij „Create”. Komputer z scraperem przetworzy je
+    przy najbliższym przebiegu (do ~30 min), doda produkt i opisze wynik w zgłoszeniu.
+    Ceny pojawią się w kolejnym przebiegu.</p>
+</form>
+
+<section class="card">
+  <h2>Ostatnie zgłoszenia</h2>
+  <ul class="requests" id="requests"><li class="muted">Wczytywanie…</li></ul>
+</section>
+
+<script>
+const BRANCH = 'main';
+const LABEL = 'dodaj-produkt';
+const MARKER = '<!-- price-scraper:dodaj -->';
+const SHOP_HOSTS = ['www.euro.com.pl', 'www.mediaexpert.pl', 'mediamarkt.pl'];
+
+// login/repo z adresu GitHub Pages (login.github.io/repo/), lokalnie - repo domyslne
+function repoSlug() {
+  const m = location.hostname.match(/^([^.]+)\.github\.io$/);
+  const repo = location.pathname.split('/').filter(Boolean)[0];
+  return m && repo ? `${m[1]}/${repo}` : 'zarzycki100/price-scraper';
+}
+const REPO = repoSlug();
+
+function hostOf(url) {
+  try { return new URL(url).hostname; } catch (e) { return ''; }
+}
+const oneLine = s => s.replace(/\s+/g, ' ').trim();
+
+document.getElementById('form').addEventListener('submit', e => {
+  e.preventDefault();
+  const error = document.getElementById('error');
+  const query = oneLine(document.getElementById('query').value);
+  const name = oneLine(document.getElementById('name').value);
+  const search = document.getElementById('search').checked;
+  error.hidden = true;
+
+  let problem = '';
+  if (!query) problem = 'Wpisz link albo nazwę produktu.';
+  else if (/^https?:/i.test(query) && !SHOP_HOSTS.includes(hostOf(query)))
+    problem = 'Obsługiwane są tylko linki z euro.com.pl, mediaexpert.pl i mediamarkt.pl.';
+  else if (!/^https?:/i.test(query) && !search)
+    problem = 'Samą nazwę trzeba wyszukać w sklepach – zaznacz wyszukiwanie albo wklej link.';
+  else if (query.length > 500) problem = 'Za długi tekst.';
+  if (problem) { error.textContent = problem; error.hidden = false; return; }
+
+  const title = 'Dodaj produkt: ' + (name || query).slice(0, 90);
+  const body = [
+    MARKER,
+    'zapytanie: ' + query,
+    'nazwa: ' + name,
+    'szukaj: ' + (search ? 'tak' : 'nie'),
+    '',
+    '_Zgłoszenie z formularza dodawania produktu – przetworzy je skrypt add_products.py przy najbliższym przebiegu crona._',
+  ].join('\n');
+  const url = `https://github.com/${REPO}/issues/new?` + new URLSearchParams({ title, body, labels: LABEL });
+  window.open(url, '_blank', 'noopener');
+});
+
+// podpowiedzi istniejacych nazw produktow
+async function loadNames() {
+  const sources = ['../products.csv', `https://raw.githubusercontent.com/${REPO}/${BRANCH}/products.csv`];
+  for (const src of sources) {
+    try {
+      const res = await fetch(src, { cache: 'no-store' });
+      if (!res.ok) continue;
+      const names = new Set();
+      for (const line of (await res.text()).split(/\r?\n/).slice(1)) {
+        // nazwa to pierwsze pole; moze byc w cudzyslowie (przecinek w nazwie)
+        const m = line.match(/^"((?:[^"]|"")*)",/) || line.match(/^([^,]+),/);
+        if (m) names.add(m[1].replace(/""/g, '"'));
+      }
+      document.getElementById('existing').replaceChildren(...[...names].map(n => Object.assign(document.createElement('option'), { value: n })));
+      return;
+    } catch (e) { /* nastepne zrodlo */ }
+  }
+}
+
+// ostatnie zgloszenia (publiczne API GitHuba, bez logowania)
+async function loadRequests() {
+  const list = document.getElementById('requests');
+  try {
+    const res = await fetch(`https://api.github.com/repos/${REPO}/issues?labels=${LABEL}&state=all&per_page=10`);
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const issues = await res.json();
+    if (!issues.length) {
+      list.replaceChildren(Object.assign(document.createElement('li'), { className: 'muted', textContent: 'Brak zgłoszeń.' }));
+      return;
+    }
+    list.replaceChildren(...issues.map(issue => {
+      const li = document.createElement('li');
+      const [cls, text] = issue.state === 'open' ? ['wait', 'czeka']
+        : issue.state_reason === 'completed' ? ['ok', 'dodano'] : ['no', 'nie dodano'];
+      const a = Object.assign(document.createElement('a'), {
+        href: issue.html_url, target: '_blank', rel: 'noopener', className: 'req-title',
+        textContent: issue.title.replace(/^Dodaj produkt:\s*/, ''),
+      });
+      const when = Object.assign(document.createElement('span'), {
+        className: 'muted',
+        textContent: new Date(issue.created_at).toLocaleString('pl-PL', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }),
+      });
+      li.append(Object.assign(document.createElement('span'), { className: 'badge ' + cls, textContent: text }), a, when);
+      return li;
+    }));
+  } catch (e) {
+    list.replaceChildren(Object.assign(document.createElement('li'), { className: 'muted', textContent: 'Nie udało się wczytać zgłoszeń (' + e.message + ').' }));
+  }
+}
+
+loadNames();
+loadRequests();
+</script>
+</body>
+</html>

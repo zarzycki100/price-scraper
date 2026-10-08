@@ -48,13 +48,21 @@ git config user.email "$(git -C "$CLONE_DIR" config --global user.email || echo 
 git fetch --quiet origin main
 git reset --quiet --hard origin/main
 
+# zgloszenia "dodaj-produkt" z GitHuba (strona docs/dodaj.html) - przed scraperem,
+# zeby nowe produkty mialy ceny juz w tym przebiegu; blad nie blokuje scrapowania
+python3 add_products.py || echo "add_products.py zakonczyl sie bledem"
+
 python3 scraper.py || status=$?
 
-git add data/prices.csv
+git add data/prices.csv products.csv
 if git diff --cached --quiet; then
   echo "Brak zmian w danych."
 else
-  git commit --quiet -m "Aktualizacja cen $(date -u +'%Y-%m-%d %H:%M') UTC"
+  msg="Aktualizacja cen $(date -u +'%Y-%m-%d %H:%M') UTC"
+  if ! git diff --cached --quiet -- products.csv; then
+    msg="Nowe produkty i aktualizacja cen $(date -u +'%Y-%m-%d %H:%M') UTC"
+  fi
+  git commit --quiet -m "$msg"
   # jesli w miedzyczasie ktos wypchnal zmiany - dociagamy i probujemy ponownie
   for attempt in 1 2 3; do
     if git push --quiet origin HEAD:main; then
